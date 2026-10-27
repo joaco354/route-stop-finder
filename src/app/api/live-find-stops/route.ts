@@ -6,9 +6,11 @@ import type { StopRequest } from "@/lib/types";
 /**
  * POST /api/live-find-stops — REAL-data planning (Phase 2C).
  *
- * Currently covers Boston ↔ Washington, DC only. Businesses come from
- * the local verified OSM corridor dataset; routes and detours come from
- * the configured routing provider (see src/lib/routing).
+ * Currently covers trips between the Northeast corridor cities listed
+ * in LIVE_CORRIDOR_CITIES (Boston ↔ Washington, DC and every pair in
+ * between). Businesses come from the local verified OSM corridor
+ * dataset; routes and detours come from the configured routing
+ * provider (see src/lib/routing).
  *
  * Honesty contract: if live data cannot answer, this route returns an
  * error/unsupported response — it NEVER substitutes sample results.
@@ -22,7 +24,36 @@ interface PostBody {
   debug?: boolean;
 }
 
+/**
+ * Lightweight per-IP rate limit (Phase 3): protects the routing
+ * provider from abuse and cost spikes. In-memory per server process —
+ * on serverless hosting each instance keeps its own counter, so treat
+ * this as a basic safeguard, not a hard quota.
+ */
+const RATE_LIMIT_PER_MINUTE = 30;
+const rateBuckets = new Map<string, { count: number; windowStart: number }>();
+
+function rateLimited(ip: string): boolean {
+  const now = Date.now();
+  const bucket = rateBuckets.get(ip);
+  if (!bucket || now - bucket.windowStart >= 60_000) {
+    rateBuckets.set(ip, { count: 1, windowStart: now });
+    return false;
+  }
+  bucket.count++;
+  return bucket.count > RATE_LIMIT_PER_MINUTE;
+}
+
 export async function POST(req: NextRequest) {
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  if (rateLimited(ip)) {
+    return NextResponse.json(
+      { error: "Lots of searches right now — please wait a moment and try again." },
+      { status: 429 },
+    );
+  }
+
   let body: PostBody;
   try {
     body = (await req.json()) as PostBody;
@@ -36,7 +67,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "Live data currently covers Boston ↔ Washington, DC only. Other routes still use sample data.",
+          "This route isn't in the beta coverage area yet. Live data covers trips between Boston, Hartford, New Haven, Stamford, New York, Newark, Philadelphia, Baltimore, and Washington, DC.",
       },
       { status: 400 },
     );

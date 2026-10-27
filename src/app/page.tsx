@@ -5,9 +5,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import ResultsCard from "@/components/ResultsCard";
 import SearchPanel from "@/components/SearchPanel";
 import type { MapAlternative } from "@/components/MapView";
-import { resolveCity } from "@/lib/cities";
+import { isLiveCorridorPair, resolveCity } from "@/lib/cities";
 import { derivePlan, type EvaluatedStopData } from "@/lib/live/derive";
-import { findMultiStops, formatDuration, MAX_STOPS } from "@/lib/scoring";
+import { formatDuration, MAX_STOPS } from "@/lib/scoring";
 import type { MultiStopResult, PlannedStop, StopRequest } from "@/lib/types";
 
 const MapView = dynamic(() => import("@/components/MapView"), {
@@ -21,13 +21,14 @@ const MapView = dynamic(() => import("@/components/MapView"), {
 
 const INITIAL_STOPS: StopRequest[] = [{ query: "McDonald's", preferredStopMinutes: 180 }];
 
-/** Routes with REAL data (Phase 2C): Boston ↔ Washington, DC only. */
+/** Routes with REAL data (Phase 3 beta): trips between the corridor
+ *  cities in LIVE_CORRIDOR_CITIES (Boston ↔ Washington, DC). */
 function isLivePair(origin: string, destination: string): boolean {
-  const a = resolveCity(origin);
-  const b = resolveCity(destination);
-  if (!a || !b) return false;
-  return [a.shortName, b.shortName].sort().join("|") === "Boston|Washington";
+  return isLiveCorridorPair(resolveCity(origin), resolveCity(destination));
 }
+
+const COVERAGE_NOTICE =
+  "The beta covers trips between Boston, Hartford, New Haven, Stamford, New York, Newark, Philadelphia, Baltimore, and Washington, DC. This route isn't covered yet — we're expanding coverage as the beta grows.";
 
 interface LiveDataState extends EvaluatedStopData {
   provider: { id: string; label: string };
@@ -105,25 +106,12 @@ export default function HomePage() {
         void fetchLive(nextStops, nextOverrides);
         return;
       }
-      const res = findMultiStops(
-        { origin, destination, stops: nextStops },
-        nextOverrides,
-      );
-      if ("error" in res) {
-        setError(res.error);
-        setNotice(null);
-        setResult(null);
-        return;
-      }
-      if ("unsupported" in res) {
-        setNotice(res.unsupported);
-        setError(null);
-        setResult(null);
-        return;
-      }
+      // Public beta: routes outside the live coverage area get an honest
+      // notice — sample results are never shown as if they were real.
+      setNotice(COVERAGE_NOTICE);
       setError(null);
-      setNotice(null);
-      setResult(res);
+      setResult(null);
+      setLiveData(null);
     },
     [origin, destination, stops, overrides, fetchLive],
   );
@@ -189,8 +177,9 @@ export default function HomePage() {
     [result],
   );
 
-  /** True when the current inputs are the live corridor AND live data loaded. */
-  const liveActive = isLivePair(origin, destination) && liveData != null;
+  /** True when live data is loaded (results now only ever come from live
+   *  fetches — sample results are not shown in the beta). */
+  const liveActive = liveData != null;
 
   const mapAlternatives: MapAlternative[] = useMemo(
     () =>
@@ -208,6 +197,9 @@ export default function HomePage() {
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Route Stop Finder</h1>
         <p className="mt-1 text-sm text-slate-600 md:text-base">
           The stops that add the least driving time — near when you want to stop.
+        </p>
+        <p className="mt-1 text-xs text-slate-400">
+          Public beta — real data for trips between Boston and Washington, DC, and the cities in between.
         </p>
       </header>
 
@@ -233,14 +225,13 @@ export default function HomePage() {
             {result && (
               <>
                 <p className="mt-3 text-center text-xs font-semibold">
-                  {liveActive ? (
-                    <span className="text-emerald-600">● Live data — {liveData!.provider.label}</span>
-                  ) : (
-                    <span className="text-slate-400">Sample data</span>
-                  )}
+                  <span className="text-emerald-600">● Live data — {liveData!.provider.label}</span>
                 </p>
                 <p className="mt-1 text-center text-sm text-slate-500">
                   Direct trip: {formatDuration(result.route.durationMinutes)} · {result.route.distanceMiles} mi
+                </p>
+                <p className="mt-1 text-center text-xs text-slate-400">
+                  Driving times are estimates — no live traffic.
                 </p>
               </>
             )}
@@ -277,7 +268,7 @@ export default function HomePage() {
             Dashed = direct route · Blue = route via your stops (numbered, in order) ·{" "}
             {liveActive
               ? "Live route — Valhalla · Business data © OpenStreetMap contributors (ODbL)"
-              : "Sample data for the prototype"}
+              : "Beta coverage: Boston ↔ Washington, DC corridor"}
           </p>
         </section>
       </div>

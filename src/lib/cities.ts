@@ -35,6 +35,38 @@ export function normalizePlace(input: string): string {
   return input.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/**
+ * Cities covered by REAL data (Phase 3 beta): every city on the
+ * Boston ↔ Washington, DC corridor for which the verified OpenStreetMap
+ * business dataset was built. Any pair of DISTINCT cities from this set
+ * is a live route — the planner is fully generic, no per-pair code.
+ */
+export const LIVE_CORRIDOR_CITIES: ReadonlySet<string> = new Set([
+  "Boston",
+  "Hartford",
+  "New Haven",
+  "Stamford",
+  "New York",
+  "Newark",
+  "Philadelphia",
+  "Baltimore",
+  "Washington",
+]);
+// NOTE: Providence, RI is deliberately NOT in the beta set yet — trips
+// to/from Providence route along I-95 south of Boston, a segment the
+// corridor business dataset does not cover (it follows the Boston→DC
+// route via I-90/I-84). Add it back when the dataset extends there.
+
+export function isLiveCorridorPair(a: City | null, b: City | null): boolean {
+  return (
+    !!a &&
+    !!b &&
+    a.shortName !== b.shortName &&
+    LIVE_CORRIDOR_CITIES.has(a.shortName) &&
+    LIVE_CORRIDOR_CITIES.has(b.shortName)
+  );
+}
+
 /** Resolve free text ("Boston", "boston ma", "Boston, MA") to a known city, or null. */
 export function resolveCity(input: string): City | null {
   const q = normalizePlace(input);

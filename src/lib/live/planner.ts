@@ -1,4 +1,4 @@
-import { resolveCity } from "../cities";
+import { isLiveCorridorPair, resolveCity } from "../cities";
 import {
   getRoutingProvider,
   ProviderUnavailableError,
@@ -21,7 +21,9 @@ import { CORRIDOR_BUSINESSES, type LiveBusiness } from "./businesses";
 import { derivePlan, type EvaluatedStopData } from "./derive";
 
 /**
- * LIVE PLANNER (Phase 2C) — Boston ↔ Washington, DC only.
+ * LIVE PLANNER (Phase 2C, corridor generalized in Phase 3) — trips
+ * between the Boston ↔ Washington, DC corridor cities (see
+ * LIVE_CORRIDOR_CITIES in cities.ts).
  *
  * Pipeline per search:
  *  1. Direct route from the configured routing provider (cached).
@@ -266,6 +268,16 @@ export async function planLiveStops(input: {
     const req = requests[i];
     const preferred = req.preferredStopMinutes ?? null;
     const tSelect = performance.now();
+    if (!req.query.trim()) {
+      // An empty query must not silently match every business.
+      candidatesByStop.push([]);
+      stopMessages.push(
+        "Type what you're looking for — for example McDonald's, Starbucks, or gas station — and search again.",
+      );
+      diag.stops.push({ query: req.query, matched: 0, afterFilters: 0, evaluated: 0 });
+      diag.candidateSelectionMs += performance.now() - tSelect;
+      continue;
+    }
     const matched = matchStops(ALL_CANDIDATES, req.query);
 
     if (matched.length === 0) {
@@ -295,7 +307,9 @@ export async function planLiveStops(input: {
     if (projected.length === 0) {
       candidatesByStop.push([]);
       stopMessages.push(
-        `No ${req.query || "stop"} found after the previous stop on this route — try removing the time preference or reordering`,
+        i === 0
+          ? `No ${req.query || "stop"} found along this route in the beta dataset — try a different stop type, or check back as coverage grows.`
+          : `No ${req.query || "stop"} found after the previous stop on this route — try removing the time preference or reordering.`,
       );
       diag.stops.push({ query: req.query, matched: matched.length, afterFilters: 0, evaluated: 0 });
       diag.candidateSelectionMs += performance.now() - tSelect;
@@ -419,11 +433,7 @@ export function buildLiveResult(
 }
 
 export function isLiveCorridor(originInput: string, destinationInput: string): boolean {
-  const o = resolveCity(originInput);
-  const d = resolveCity(destinationInput);
-  if (!o || !d) return false;
-  const pair = [o.shortName, d.shortName].sort().join("|");
-  return pair === "Boston|Washington";
+  return isLiveCorridorPair(resolveCity(originInput), resolveCity(destinationInput));
 }
 
 export type { City };

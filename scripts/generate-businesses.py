@@ -27,7 +27,8 @@ def addr_of(tags):
     city = tags.get("addr:city") or tags.get("addr:town") or ""
     state = tags.get("addr:state", "")
     if city: parts.append(f"{city}, {state}" if state else city)
-    elif tags.get("addr:postcode"): parts.append(tags["addr:postcode"])
+    # A postcode alone is not an address — never present it as one
+    # (Phase 3 fix; such entries get an empty address instead).
     return ", ".join(parts)
 
 def hav_m(a, b):

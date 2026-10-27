@@ -79,7 +79,11 @@ export default function ResultsCard({ plan, originLabel, destinationLabel, onSel
               <NumberBadge n={i + 1} /> Stop {i + 1} · Best pick
             </p>
             <h3 className="mt-1 text-xl font-bold text-slate-900">{entry.chosen.name}</h3>
-            <p className="text-sm text-slate-600">{entry.chosen.address}</p>
+            {entry.chosen.address ? (
+              <p className="text-sm text-slate-600">{entry.chosen.address}</p>
+            ) : (
+              <p className="text-sm text-slate-400">Address not listed — exact location on the map pin</p>
+            )}
             <StopDetails stop={entry.chosen} />
 
             {entry.alternatives.length > 0 && (
@@ -96,7 +100,9 @@ export default function ResultsCard({ plan, originLabel, destinationLabel, onSel
                       <span className="font-semibold text-slate-900">{stop.name}</span>
                       <span className="shrink-0 text-sm font-medium text-slate-600">+{stop.detourMinutes} min</span>
                     </div>
-                    <p className="text-sm text-slate-500">{stop.address}</p>
+                    <p className="text-sm text-slate-500">
+                      {stop.address || "Address not listed — see map pin"}
+                    </p>
                     <p className="mt-1 text-xs text-slate-500">
                       Reach it in {formatDuration(stop.arrivalMinutes)} · total {formatDuration(stop.totalMinutes)} — tap to use this one instead
                     </p>

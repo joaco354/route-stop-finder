@@ -96,13 +96,20 @@ prototype, not live listings. The search works for **any** stop type or brand,
 not only McDonald's — try the quick chips (Starbucks, gas station, coffee,
 hotel, pharmacy, grocery) or type your own.
 
-## Live data (Phase 2C — Boston ↔ Washington, DC)
+## Live data (Phase 2C–3 — Northeast corridor)
 
-Boston ↔ Washington, DC now runs on REAL data; every other route still
-uses the sample data above, and the UI labels which mode you are in
-("● Live data" vs "Sample data"). Live mode never falls back to sample
-results silently — if live routing is unavailable you get an explanation
-instead of results.
+Trips between the corridor cities **Boston, Hartford, New Haven,
+Stamford, New York, Newark, Philadelphia, Baltimore, and Washington,
+DC** (any pair, either direction) run on REAL data; the UI labels them
+"● Live data". Routes outside the coverage area get an honest notice —
+sample results are never shown as if they were real (the sample engine
+remains in the codebase for development only). Providence, RI is not
+in the beta set yet: trips there use I-95 south of Boston, a segment
+the business dataset doesn't cover. Live mode never falls back to
+sample results silently — if live routing is unavailable you get an
+explanation instead of results. The live API is rate-limited to 30
+searches/minute per IP (basic abuse safeguard; in-memory, per server
+process). Driving times are estimates — no live traffic.
 
 - **Routing** — provider-independent adapter in `src/lib/routing/`
   (`RoutingProvider` interface). Default: **Valhalla** public demo server
