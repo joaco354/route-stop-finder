@@ -96,20 +96,25 @@ prototype, not live listings. The search works for **any** stop type or brand,
 not only McDonald's — try the quick chips (Starbucks, gas station, coffee,
 hotel, pharmacy, grocery) or type your own.
 
-## Live data (Phase 2C–3 — Northeast corridor)
+## Live data (Northeast region)
 
-Trips between the corridor cities **Boston, Hartford, New Haven,
-Stamford, New York, Newark, Philadelphia, Baltimore, and Washington,
-DC** (any pair, either direction) run on REAL data; the UI labels them
-"● Live data". Routes outside the coverage area get an honest notice —
-sample results are never shown as if they were real (the sample engine
-remains in the codebase for development only). Providence, RI is not
-in the beta set yet: trips there use I-95 south of Boston, a segment
-the business dataset doesn't cover. Live mode never falls back to
-sample results silently — if live routing is unavailable you get an
-explanation instead of results. The live API is rate-limited to 30
-searches/minute per IP (basic abuse safeguard; in-memory, per server
-process). Driving times are estimates — no live traffic.
+Trips between the region's cities and towns — **Boston, Providence,
+Worcester, Springfield, Hartford, New Haven, Bridgeport, New London,
+Stamford, New York, Newark, Trenton, Philadelphia, Wilmington,
+Baltimore, Washington DC, Buffalo, Rochester, Syracuse, Albany,
+Binghamton, Erie, Pittsburgh, Harrisburg, Scranton, Allentown,
+Portland ME, Bangor, Burlington, and Concord** (any pair, either
+direction) run on REAL data; the UI labels them "● Live data". The
+region is the loop Buffalo → Pittsburgh → Washington, DC → (I-95) →
+Boston → Bangor → Burlington → Buffalo, plus the interior interstate
+network. Routes outside the coverage area get an honest notice —
+sample results are never shown as if they were real (the sample
+engine remains in the codebase for development only). Live mode never
+falls back to sample results silently — if live routing is
+unavailable you get an explanation instead of results. The live API
+is rate-limited to 30 searches/minute per IP (basic abuse safeguard;
+in-memory, per server process). Driving times are estimates — no
+live traffic.
 
 - **Routing** — provider-independent adapter in `src/lib/routing/`
   (`RoutingProvider` interface). Default: **Valhalla** public demo server
@@ -117,17 +122,21 @@ process). Driving times are estimates — no live traffic.
   self-hosted instance). Alternative: **openrouteservice** hosted
   (`ROUTING_PROVIDER=openrouteservice` + `ORS_API_KEY`, free Standard
   account; key is personal and server-side only). See `.env.example`.
-- **Businesses** — a local OpenStreetMap dataset for the corridor
+- **Businesses** — a local OpenStreetMap dataset for the region
   (`src/lib/live/businesses.json`, loaded by `businesses.ts`):
-  **19,382 businesses** — restaurants (7,200), fast food (4,078),
-  coffee shops (1,544), gas stations (1,770), convenience stores
-  (1,684), hotels/motels (1,088), grocery stores (914), pharmacies
-  (573), EV charging stations (475), and rest areas (56);
-  © OpenStreetMap contributors, ODbL. Categories are assigned from
-  OSM tags (amenity/shop/tourism/highway), never curated by brand, so
-  any chain or independent in the data is searchable by name, and
-  category searches span every brand. The app never queries Overpass
-  at runtime.
+  **52,586 businesses** within ~5 km of the regional highway network
+  — restaurants (19,680), fast food (10,212), convenience stores
+  (5,133), coffee shops (4,703), gas stations (4,498), hotels/motels
+  (2,925), grocery stores (2,487), pharmacies (1,589), EV charging
+  stations (1,122), and rest areas (237); © OpenStreetMap
+  contributors, ODbL. Categories are assigned from OSM tags
+  (amenity/shop/tourism/highway), never curated by brand, so any
+  chain or independent in the data is searchable by name, and
+  category searches span every brand. Addresses come from OSM; when
+  OSM has no town for a business, the town is filled in from the
+  nearest US Census place (`scripts/ne-towns.json`) so results always
+  say which town a stop is in (99% coverage) — street addresses are
+  never invented. The app never queries Overpass at runtime.
 - **Detours** — each finalist gets a real route-through calculation;
   ranking uses the unchanged scoring algorithm. Moving the time slider
   re-ranks the already-evaluated candidates in the browser — no extra
@@ -140,17 +149,19 @@ Businesses open and close, so refresh the dataset about once a month.
 It takes two commands and no code changes:
 
 ```bash
-python3 scripts/build-corridor-dataset.py   # fetch Overpass extracts (~15 min; flaky mirrors retry automatically; groups already fetched are skipped — set RSF_FORCE_FETCH=1 to refetch all)
-python3 scripts/generate-businesses.py      # rebuild src/lib/live/businesses.json and print per-category counts
-npm run build                               # sanity-check the app with the new data
+~/workspace/.tools/osmium-venv/bin/python scripts/build-region-dataset.py   # download the Geofabrik US-Northeast extract (skipped when present) and pull every business within ~5 km of the line network
+python3 scripts/generate-businesses.py                                     # rebuild src/lib/live/businesses.json + suggestions.json and print per-category counts
+npm run build                                                              # sanity-check the app with the new data
 ```
 
-Then commit the regenerated `businesses.json`. The fetch uses one
-build-time Overpass query per category group along the saved corridor
-centerline (`scripts/corridor-route.json`); raw extracts land in the
-feasibility workspace, outside the repo. If a group fails on every
-mirror (the public Overpass servers are shared and busy), just rerun
-the script later — finished groups are not refetched.
+Then commit the regenerated `businesses.json` and `suggestions.json`.
+The line network (perimeter loop + interior interstates) is saved as
+route geometries in `scripts/corridor-route*.json` and
+`scripts/lines/*.json`; to extend coverage, add a line file there and
+rerun. The raw extract and POI file live in the feasibility
+workspace, outside the repo. (Extraction reads the ~1.8 GB PBF with
+pyosmium, installed in the venv noted above: `python3 -m venv
+~/workspace/.tools/osmium-venv && ~/workspace/.tools/osmium-venv/bin/pip install osmium`.)
 
 ## Performance & caching (Phase 2D)
 

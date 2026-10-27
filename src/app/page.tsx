@@ -22,13 +22,13 @@ const MapView = dynamic(() => import("@/components/MapView"), {
 const INITIAL_STOPS: StopRequest[] = [{ query: "McDonald's", preferredStopMinutes: 180 }];
 
 /** Routes with REAL data (Phase 3 beta): trips between the corridor
- *  cities in LIVE_CORRIDOR_CITIES (Boston ↔ Washington, DC). */
+ *  cities in LIVE_CORRIDOR_CITIES (the Northeast region). */
 function isLivePair(origin: string, destination: string): boolean {
   return isLiveCorridorPair(resolveCity(origin), resolveCity(destination));
 }
 
 const COVERAGE_NOTICE =
-  "The beta covers trips between Boston, Hartford, New Haven, Stamford, New York, Newark, Philadelphia, Baltimore, and Washington, DC. This route isn't covered yet — we're expanding coverage as the beta grows.";
+  "The beta covers the Northeast region — from Bangor, ME to Washington, DC, and from Buffalo and Pittsburgh across to Boston — including the major cities and towns in between. This route isn't covered yet — we're expanding coverage as the beta grows.";
 
 interface LiveDataState extends EvaluatedStopData {
   provider: { id: string; label: string };
@@ -199,7 +199,7 @@ export default function HomePage() {
           The stops that add the least driving time — near when you want to stop.
         </p>
         <p className="mt-1 text-xs text-slate-400">
-          Public beta — real data for trips between Boston and Washington, DC, and the cities in between.
+          Public beta — real data across the Northeast, from Bangor to Washington, DC and Buffalo to Boston.
         </p>
       </header>
 
@@ -268,7 +268,7 @@ export default function HomePage() {
             Dashed = direct route · Blue = route via your stops (numbered, in order) ·{" "}
             {liveActive
               ? "Live route — Valhalla · Business data © OpenStreetMap contributors (ODbL)"
-              : "Beta coverage: Boston ↔ Washington, DC corridor"}
+              : "Beta coverage: the Northeast region (Bangor ↔ Washington, DC ↔ Buffalo)"}
           </p>
         </section>
       </div>

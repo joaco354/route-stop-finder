@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "This route isn't in the beta coverage area yet. Live data covers trips between Boston, Hartford, New Haven, Stamford, New York, Newark, Philadelphia, Baltimore, and Washington, DC.",
+          "This route isn't in the beta coverage area yet. Live data covers the Northeast region — Bangor, ME to Washington, DC, and Buffalo/Pittsburgh across to Boston — including the major cities and towns in between.",
       },
       { status: 400 },
     );

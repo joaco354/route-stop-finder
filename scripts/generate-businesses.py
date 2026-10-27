@@ -1,12 +1,11 @@
-"""Generate src/lib/live/businesses.json from raw Overpass corridor extracts.
+"""Generate src/lib/live/businesses.json from the regional POI extract.
 
-Inputs (in ~/workspace/rsf-feasibility/), produced by
-scripts/build-corridor-dataset.py:
-  corridor_v3_food.json     amenity=fast_food | restaurant | cafe
-  corridor_v3_fuel.json     amenity=fuel
-  corridor_v3_charging.json amenity=charging_station
-  corridor_v3_shops.json    amenity=pharmacy, shop=convenience | supermarket
-  corridor_v3_lodging.json  tourism=hotel | motel, highway=rest_area | services
+Input (in ~/workspace/rsf-feasibility/), produced by
+scripts/build-region-dataset.py: region_pois.json — every OSM
+business feature within ~5 km of the regional line network
+(Buffalo → Pittsburgh → DC → I-95 → Bangor → Burlington loop plus
+interior interstates), extracted locally from the Geofabrik
+US-Northeast PBF.
 
 Categories are assigned from the OSM tags themselves — no brand is
 curated by hand. Output entries are deduplicated (same brand/name
@@ -58,8 +57,8 @@ CATEGORY_LABELS = {
 }
 
 
-def load(label):
-    with open(f"{FEAS}/corridor_v3_{label}.json") as f:
+def load_elements():
+    with open(f"{FEAS}/region_pois.json") as f:
         return json.load(f).get("elements", [])
 
 
@@ -152,34 +151,33 @@ def norm(s):
 entries = []
 seen_osm = set()
 stats = {"town_filled": 0}
-for label in ("food", "fuel", "charging", "shops", "lodging"):
-    for e in load(label):
-        key = (e["type"], e["id"])
-        if key in seen_osm:
-            continue
-        seen_osm.add(key)
-        tags = e.get("tags", {})
-        category = category_of(tags)
-        if category is None:
-            continue
-        lat = e.get("lat") or e.get("center", {}).get("lat")
-        lon = e.get("lon") or e.get("center", {}).get("lon")
-        if lat is None or lon is None:
-            continue
-        brand = tags.get("brand", "")
-        name = tags.get("name") or brand or tags.get("operator") or GENERIC_NAME[category]
-        entries.append(
-            {
-                "name": name,
-                "brand": brand,
-                "category": category,
-                "address": build_address(tags, lat, lon, stats),
-                "lat": round(lat, 6),
-                "lng": round(lon, 6),
-                "osmType": e["type"],
-                "osmId": e["id"],
-            }
-        )
+for e in load_elements():
+    key = (e["type"], e["id"])
+    if key in seen_osm:
+        continue
+    seen_osm.add(key)
+    tags = e.get("tags", {})
+    category = category_of(tags)
+    if category is None:
+        continue
+    lat = e.get("lat") or e.get("center", {}).get("lat")
+    lon = e.get("lon") or e.get("center", {}).get("lon")
+    if lat is None or lon is None:
+        continue
+    brand = tags.get("brand", "")
+    name = tags.get("name") or brand or tags.get("operator") or GENERIC_NAME[category]
+    entries.append(
+        {
+            "name": name,
+            "brand": brand,
+            "category": category,
+            "address": build_address(tags, lat, lon, stats),
+            "lat": round(lat, 6),
+            "lng": round(lon, 6),
+            "osmType": e["type"],
+            "osmId": e["id"],
+        }
+    )
 
 # Dedupe: same normalized brand (or name, for independents) within
 # 150 m — keep the entry that has a fuller address. Bucketed by rounded

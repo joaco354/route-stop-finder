@@ -172,9 +172,13 @@ function projectOntoRoute(
   lng: number,
 ): { alongMinutes: number; offRouteKm: number } {
   const path = proj.path;
-  // Candidate segments: the point's grid cell + neighbors. Falls back
-  // to every segment when the point is far outside the gridded area.
-  let indices: number[] | undefined;
+  // Candidate segments: the point's grid cell + neighbors. The grid
+  // cells are ~13 × 10 km and the off-route filter is 8 km, so when
+  // no segment falls in the 3×3 neighborhood the point is provably
+  // too far from the route to matter — report it as infinitely far
+  // instead of scanning the whole path. (With a regional dataset,
+  // most matched businesses are hundreds of km from a given route;
+  // the old full-scan fallback made broad searches take seconds.)
   const cx = Math.floor(lat / GRID_CELL_DEG);
   const cy = Math.floor(lng / GRID_CELL_DEG);
   const gathered: number[] = [];
@@ -184,7 +188,10 @@ function projectOntoRoute(
       if (cell) gathered.push(...cell);
     }
   }
-  indices = gathered.length > 0 ? gathered : undefined;
+  if (gathered.length === 0) {
+    return { alongMinutes: 0, offRouteKm: Number.POSITIVE_INFINITY };
+  }
+  const indices = gathered;
 
   let best = { distKm: Infinity, along: 0 };
   const scan = (i: number) => {
@@ -210,8 +217,6 @@ function projectOntoRoute(
   };
   if (indices) {
     for (const i of indices) scan(i);
-  } else {
-    for (let i = 1; i < path.length; i++) scan(i);
   }
   return { alongMinutes: best.along, offRouteKm: best.distKm };
 }
