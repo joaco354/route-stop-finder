@@ -1,10 +1,12 @@
 import type { City } from "./types";
+import { REGIONAL_TOWNS } from "./towns";
 
-/** Small built-in city list used for autocomplete and for resolving the
- *  curated sample corridors (see sampleData.ts). Routes between listed
- *  cities without a curated corridor are reported as unsupported.
- *  A live version would use Google Places Autocomplete instead. */
-export const CITIES: City[] = [
+/** Built-in city list used for endpoint resolution (see cities below
+ *  plus REGIONAL_TOWNS). The 30 major cities come first; the regional
+ *  towns generated from Census data follow. Routes between two
+ *  live-coverage places run on real data; anything else gets an
+ *  honest coverage notice. */
+export const BASE_CITIES: City[] = [
   { name: "Boston, MA", shortName: "Boston", lat: 42.3601, lng: -71.0589 },
   { name: "New York, NY", shortName: "New York", lat: 40.7128, lng: -74.006 },
   { name: "Washington, DC", shortName: "Washington", lat: 38.9072, lng: -77.0369 },
@@ -51,6 +53,10 @@ export const CITIES: City[] = [
   { name: "Houston, TX", shortName: "Houston", lat: 29.7604, lng: -95.3698 },
 ];
 
+/** Every resolvable endpoint: the base list plus the generated
+ *  regional towns (src/lib/towns.ts). */
+export const CITIES: City[] = [...BASE_CITIES, ...REGIONAL_TOWNS];
+
 export function normalizePlace(input: string): string {
   return input.trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -96,6 +102,9 @@ export const LIVE_CORRIDOR_CITIES: ReadonlySet<string> = new Set([
   "Bangor, ME",
   "Burlington, VT",
   "Concord, NH",
+  // Plus every generated regional town (Census places near the
+  // highway network — see towns.ts / generate-towns.py).
+  ...REGIONAL_TOWNS.map((t) => t.name),
 ]);
 // Pairs whose fastest route leaves the covered line network simply
 // find fewer/no stops and get the honest coverage behavior — never

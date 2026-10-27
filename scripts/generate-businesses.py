@@ -101,7 +101,10 @@ def hav_m(a, b):
 
 
 # --- Nearest-town lookup (Census places, bucketed) ---
-_towns = json.load(open(f"{REPO}/scripts/ne-towns.json"))
+_towns_path = f"{REPO}/scripts/region-places.json"
+if not os.path.exists(_towns_path):
+    _towns_path = f"{REPO}/scripts/ne-towns.json"
+_towns = json.load(open(_towns_path))
 _town_buckets = {}
 for t in _towns:
     cell = (round(t["lat"] / 0.5), round(t["lng"] / 0.5))

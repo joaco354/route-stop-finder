@@ -1,8 +1,8 @@
 "use client";
 
-import { CITIES } from "@/lib/cities";
 import { MAX_STOPS } from "@/lib/scoring";
 import type { StopRequest } from "@/lib/types";
+import CityInput from "./CityInput";
 import QueryInput from "./QueryInput";
 import TimeSlider from "./TimeSlider";
 
@@ -35,19 +35,13 @@ export default function SearchPanel(p: Props) {
         p.onSubmit();
       }}
     >
-      <datalist id="city-suggestions">
-        {CITIES.map((c) => (
-          <option key={c.name} value={c.name} />
-        ))}
-      </datalist>
-
       <div>
         <label className={labelCls} htmlFor="origin">Starting Location</label>
-        <input id="origin" className={inputCls} list="city-suggestions" placeholder="Where are you leaving from?" value={p.origin} onChange={(e) => p.onOrigin(e.target.value)} autoComplete="off" />
+        <CityInput id="origin" className={inputCls} placeholder="Tap to browse, or start typing a city or town" value={p.origin} onChange={p.onOrigin} />
       </div>
       <div>
         <label className={labelCls} htmlFor="destination">Destination</label>
-        <input id="destination" className={inputCls} list="city-suggestions" placeholder="Where are you going?" value={p.destination} onChange={(e) => p.onDestination(e.target.value)} autoComplete="off" />
+        <CityInput id="destination" className={inputCls} placeholder="Tap to browse, or start typing a city or town" value={p.destination} onChange={p.onDestination} />
       </div>
 
       {p.stops.map((stop, i) => (
