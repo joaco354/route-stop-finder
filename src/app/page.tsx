@@ -246,15 +246,6 @@ export default function HomePage() {
               </p>
             )}
           </section>
-
-          {result && (
-            <ResultsCard
-              plan={result}
-              originLabel={origin}
-              destinationLabel={destination}
-              onSelectAlternative={selectAlternative}
-            />
-          )}
         </div>
 
         <section>
@@ -272,6 +263,19 @@ export default function HomePage() {
           </p>
         </section>
       </div>
+
+      {/* Results BELOW the search + map row: on mobile the flow reads
+          locations → trip info → map → stop picks, in that order. */}
+      {result && (
+        <div className="mx-auto mt-4 w-full max-w-3xl md:mt-6">
+          <ResultsCard
+            plan={result}
+            originLabel={origin}
+            destinationLabel={destination}
+            onSelectAlternative={selectAlternative}
+          />
+        </div>
+      )}
     </main>
   );
 }
