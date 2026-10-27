@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/* Leaflet container needs an explicit background while tiles load. */
+.leaflet-container {
+  background: #e2e8f0;
+  font: inherit;
+}
