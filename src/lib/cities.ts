@@ -11,10 +11,16 @@ export const CITIES: City[] = [
   { name: "Philadelphia, PA", shortName: "Philadelphia", lat: 39.9526, lng: -75.1652 },
   { name: "Baltimore, MD", shortName: "Baltimore", lat: 39.2904, lng: -76.6122 },
   { name: "Providence, RI", shortName: "Providence", lat: 41.824, lng: -71.4128 },
+  { name: "Worcester, MA", shortName: "Worcester", lat: 42.2626, lng: -71.8023 },
+  { name: "Springfield, MA", shortName: "Springfield", lat: 42.1015, lng: -72.5898 },
   { name: "Hartford, CT", shortName: "Hartford", lat: 41.7658, lng: -72.6734 },
   { name: "New Haven, CT", shortName: "New Haven", lat: 41.3083, lng: -72.9279 },
+  { name: "Bridgeport, CT", shortName: "Bridgeport", lat: 41.1865, lng: -73.1952 },
+  { name: "New London, CT", shortName: "New London", lat: 41.3557, lng: -72.0995 },
   { name: "Stamford, CT", shortName: "Stamford", lat: 41.0534, lng: -73.5387 },
   { name: "Newark, NJ", shortName: "Newark", lat: 40.7357, lng: -74.1724 },
+  { name: "Trenton, NJ", shortName: "Trenton", lat: 40.2171, lng: -74.7429 },
+  { name: "Wilmington, DE", shortName: "Wilmington", lat: 39.7447, lng: -75.5484 },
   { name: "Chicago, IL", shortName: "Chicago", lat: 41.8781, lng: -87.6298 },
   { name: "Atlanta, GA", shortName: "Atlanta", lat: 33.749, lng: -84.388 },
   { name: "Charlotte, NC", shortName: "Charlotte", lat: 35.2271, lng: -80.8431 },
@@ -43,19 +49,28 @@ export function normalizePlace(input: string): string {
  */
 export const LIVE_CORRIDOR_CITIES: ReadonlySet<string> = new Set([
   "Boston",
+  "Providence",
+  "Worcester",
+  "Springfield",
   "Hartford",
   "New Haven",
+  "Bridgeport",
+  "New London",
   "Stamford",
   "New York",
   "Newark",
+  "Trenton",
   "Philadelphia",
+  "Wilmington",
   "Baltimore",
   "Washington",
 ]);
-// NOTE: Providence, RI is deliberately NOT in the beta set yet — trips
-// to/from Providence route along I-95 south of Boston, a segment the
-// corridor business dataset does not cover (it follows the Boston→DC
-// route via I-90/I-84). Add it back when the dataset extends there.
+// The business dataset covers three Northeast centerlines: the
+// inland Boston→DC route (I-90/I-84/I-91/I-95), the I-95 coastal route
+// through Providence, and the Worcester→Providence connector (MA-146).
+// Every city above sits on that network. Pairs whose fastest route
+// leaves the covered lines simply find fewer/no stops and get the
+// honest coverage behavior — never invented results.
 
 export function isLiveCorridorPair(a: City | null, b: City | null): boolean {
   return (

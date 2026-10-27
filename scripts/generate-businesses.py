@@ -2,25 +2,34 @@
 
 Inputs (in ~/workspace/rsf-feasibility/), produced by
 scripts/build-corridor-dataset.py:
-  corridor_v2_food.json     amenity=fast_food | restaurant | cafe
-  corridor_v2_fuel.json     amenity=fuel
-  corridor_v2_charging.json amenity=charging_station
-  corridor_v2_shops.json    amenity=pharmacy, shop=convenience | supermarket
-  corridor_v2_lodging.json  tourism=hotel | motel, highway=rest_area | services
+  corridor_v3_food.json     amenity=fast_food | restaurant | cafe
+  corridor_v3_fuel.json     amenity=fuel
+  corridor_v3_charging.json amenity=charging_station
+  corridor_v3_shops.json    amenity=pharmacy, shop=convenience | supermarket
+  corridor_v3_lodging.json  tourism=hotel | motel, highway=rest_area | services
 
 Categories are assigned from the OSM tags themselves — no brand is
 curated by hand. Output entries are deduplicated (same brand/name
 within 150 m = same place), carry name/brand/category/address/coords +
 OSM type/id for audit, and are sorted along the corridor (north →
-south). Addresses are assembled from OSM addr:* tags only — never
-invented; a postcode alone is not an address.
+south).
+
+Addresses come from OSM addr:* tags. When OSM has no city for a
+business, the town is filled in from the nearest Census place
+(scripts/ne-towns.json, US Census Gazetteer 2024) within 30 km, so
+results can always say which town a stop is in. Street addresses are
+never invented; a postcode alone is not an address. Also writes
+src/lib/live/suggestions.json (autocomplete index).
 """
 import json
 import math
 import re
+from collections import Counter
 
 FEAS = "/home/hatch/workspace/rsf-feasibility"
-OUT = "/home/hatch/workspace/route-stop-finder/src/lib/live/businesses.json"
+REPO = "/home/hatch/workspace/route-stop-finder"
+OUT = f"{REPO}/src/lib/live/businesses.json"
+SUGGESTIONS_OUT = f"{REPO}/src/lib/live/suggestions.json"
 
 GENERIC_NAME = {
     "fast_food": "Fast food restaurant",
@@ -35,9 +44,22 @@ GENERIC_NAME = {
     "rest_area": "Rest area",
 }
 
+CATEGORY_LABELS = {
+    "restaurant": "Restaurant",
+    "fast_food": "Fast food",
+    "coffee": "Coffee shop",
+    "gas": "Gas station",
+    "ev_charging": "EV charging station",
+    "pharmacy": "Pharmacy",
+    "grocery": "Grocery store",
+    "convenience": "Convenience store",
+    "hotel": "Hotel",
+    "rest_area": "Rest area",
+}
+
 
 def load(label):
-    with open(f"{FEAS}/corridor_v2_{label}.json") as f:
+    with open(f"{FEAS}/corridor_v3_{label}.json") as f:
         return json.load(f).get("elements", [])
 
 
@@ -62,27 +84,11 @@ def category_of(tags):
         return "grocery"
     if shop == "convenience":
         return "convenience"
-    tourism = tags.get("tourism")
-    if tourism in ("hotel", "motel"):
+    if tags.get("tourism") in ("hotel", "motel"):
         return "hotel"
     if tags.get("highway") in ("rest_area", "services"):
         return "rest_area"
     return None
-
-
-def addr_of(tags):
-    parts = []
-    street = " ".join(
-        x for x in [tags.get("addr:housenumber", ""), tags.get("addr:street", "")] if x
-    )
-    if street:
-        parts.append(street)
-    city = tags.get("addr:city") or tags.get("addr:town") or ""
-    state = tags.get("addr:state", "")
-    if city:
-        parts.append(f"{city}, {state}" if state else city)
-    # A postcode alone is not an address — never present it as one.
-    return ", ".join(parts)
 
 
 def hav_m(a, b):
@@ -95,6 +101,46 @@ def hav_m(a, b):
     )
 
 
+# --- Nearest-town lookup (Census places, bucketed) ---
+_towns = json.load(open(f"{REPO}/scripts/ne-towns.json"))
+_town_buckets = {}
+for t in _towns:
+    cell = (round(t["lat"] / 0.5), round(t["lng"] / 0.5))
+    _town_buckets.setdefault(cell, []).append(t)
+
+
+def nearest_town(lat, lng, max_km=30.0):
+    cell = (round(lat / 0.5), round(lng / 0.5))
+    best, best_d = None, max_km * 1000
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            for t in _town_buckets.get((cell[0] + dx, cell[1] + dy), []):
+                d = hav_m((lat, lng), (t["lat"], t["lng"]))
+                if d < best_d:
+                    best, best_d = t, d
+    return best
+
+
+def build_address(tags, lat, lng, stats):
+    street = " ".join(
+        x for x in [tags.get("addr:housenumber", ""), tags.get("addr:street", "")] if x
+    )
+    city = tags.get("addr:city") or tags.get("addr:town") or ""
+    state = tags.get("addr:state", "")
+    if not city:
+        town = nearest_town(lat, lng)
+        if town:
+            city, state = town["name"], town["state"]
+            stats["town_filled"] += 1
+    parts = []
+    if street:
+        parts.append(street)
+    if city:
+        parts.append(f"{city}, {state}" if state else city)
+    # A postcode alone is not an address — never present it as one.
+    return ", ".join(parts)
+
+
 def slug(s):
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
 
@@ -105,6 +151,7 @@ def norm(s):
 
 entries = []
 seen_osm = set()
+stats = {"town_filled": 0}
 for label in ("food", "fuel", "charging", "shops", "lodging"):
     for e in load(label):
         key = (e["type"], e["id"])
@@ -126,7 +173,7 @@ for label in ("food", "fuel", "charging", "shops", "lodging"):
                 "name": name,
                 "brand": brand,
                 "category": category,
-                "address": addr_of(tags),
+                "address": build_address(tags, lat, lon, stats),
                 "lat": round(lat, 6),
                 "lng": round(lon, 6),
                 "osmType": e["type"],
@@ -135,9 +182,9 @@ for label in ("food", "fuel", "charging", "shops", "lodging"):
         )
 
 # Dedupe: same normalized brand (or name, for independents) within
-# 150 m — keep the entry that has an address. Bucketed by rounded
+# 150 m — keep the entry that has a fuller address. Bucketed by rounded
 # coords so this stays fast at tens of thousands of entries.
-entries.sort(key=lambda x: x["address"] == "")
+entries.sort(key=lambda x: -len(x["address"]))
 deduped = []
 buckets = {}
 for e in entries:
@@ -164,7 +211,6 @@ for e in entries:
 deduped.sort(key=lambda x: -x["lat"])
 for i, e in enumerate(deduped):
     e["id"] = f"osm-{slug(e['brand'] or e['name'])}-{i}"
-    # Stable key order for a clean file.
     deduped[i] = {
         "id": e["id"],
         "name": e["name"],
@@ -177,47 +223,30 @@ for i, e in enumerate(deduped):
         "osmId": e["osmId"],
     }
 
-counts = {}
-for e in deduped:
-    counts[e["category"]] = counts.get(e["category"], 0) + 1
+counts = Counter(e["category"] for e in deduped)
+with_address = sum(1 for e in deduped if e["address"])
 print("counts:", dict(sorted(counts.items())), "total:", len(deduped))
+print(f"town filled from Census for {stats['town_filled']} entries; "
+      f"entries with some address/town text: {with_address} ({100 * with_address / len(deduped):.0f}%)")
 
 with open(OUT, "w") as f:
     json.dump(deduped, f, ensure_ascii=False, separators=(",", ":"))
 print("wrote", OUT)
 
-# Suggestion index for the search box autocomplete: every brand in the
-# dataset (with its location count) + the searchable category labels.
-# Kept as a separate small file so the client never loads the dataset.
-CATEGORY_LABELS = {
-    "restaurant": "Restaurant",
-    "fast_food": "Fast food",
-    "coffee": "Coffee shop",
-    "gas": "Gas station",
-    "ev_charging": "EV charging station",
-    "pharmacy": "Pharmacy",
-    "grocery": "Grocery store",
-    "convenience": "Convenience store",
-    "hotel": "Hotel",
-    "rest_area": "Rest area",
-}
-from collections import Counter
-
+# Suggestion index for the search-box autocomplete.
 brand_counts = Counter(e["brand"] for e in deduped if e["brand"])
 suggestions = [
     {"label": label, "kind": "category", "count": counts.get(cat, 0)}
     for cat, label in CATEGORY_LABELS.items()
     if counts.get(cat, 0) > 0
 ] + [
-    # General words travelers actually type, mapped to the same
-    # category terms the search understands.
-    {"label": "Food", "kind": "category", "count": counts.get("restaurant", 0) + counts.get("fast_food", 0)},
+    {"label": "Food", "kind": "category",
+     "count": counts.get("restaurant", 0) + counts.get("fast_food", 0)},
     {"label": "Drug store", "kind": "category", "count": counts.get("pharmacy", 0)},
 ] + [
     {"label": brand, "kind": "brand", "count": n}
     for brand, n in brand_counts.most_common()
 ]
-SUGGESTIONS_OUT = "/home/hatch/workspace/route-stop-finder/src/lib/live/suggestions.json"
 with open(SUGGESTIONS_OUT, "w") as f:
     json.dump(suggestions, f, ensure_ascii=False, separators=(",", ":"))
 print(f"wrote {SUGGESTIONS_OUT}: {len(suggestions)} suggestions")
