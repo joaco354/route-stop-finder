@@ -124,11 +124,11 @@ live traffic.
   account; key is personal and server-side only). See `.env.example`.
 - **Businesses** — a local OpenStreetMap dataset for the region
   (`src/lib/live/businesses.json`, loaded by `businesses.ts`):
-  **52,586 businesses** within ~5 km of the regional highway network
-  — restaurants (19,680), fast food (10,212), convenience stores
-  (5,133), coffee shops (4,703), gas stations (4,498), hotels/motels
-  (2,925), grocery stores (2,487), pharmacies (1,589), EV charging
-  stations (1,122), and rest areas (237); © OpenStreetMap
+  **53,728 businesses** within ~5 km of the regional highway network
+  — restaurants (20,017), fast food (10,387), convenience stores
+  (5,267), coffee shops (4,780), gas stations (4,669), hotels/motels
+  (3,007), grocery stores (2,553), pharmacies (1,625), EV charging
+  stations (1,159), and rest areas (264); © OpenStreetMap
   contributors, ODbL. Categories are assigned from OSM tags
   (amenity/shop/tourism/highway), never curated by brand, so any
   chain or independent in the data is searchable by name, and
@@ -155,10 +155,14 @@ npm run build                                                              # san
 ```
 
 Then commit the regenerated `businesses.json` and `suggestions.json`.
-The line network (perimeter loop + interior interstates) is saved as
-route geometries in `scripts/corridor-route*.json` and
-`scripts/lines/*.json`; to extend coverage, add a line file there and
-rerun. The raw extract and POI file live in the feasibility
+Endpoint towns are generated the same way:
+`python3 scripts/generate-towns.py` rebuilds `src/lib/towns.ts`
+(1,140 Census places near the network, offered in the location
+dropdown alongside the 30 major cities) from the Census Gazetteer.
+The line network (perimeter loop + interior interstates, including
+I-91, I-88, I-87 and the Maine Turnpike) is saved as route geometries
+in `scripts/corridor-route*.json` and `scripts/lines/*.json`; to
+extend coverage, add a line file there and rerun all three steps. The raw extract and POI file live in the feasibility
 workspace, outside the repo. (Extraction reads the ~1.8 GB PBF with
 pyosmium, installed in the venv noted above: `python3 -m venv
 ~/workspace/.tools/osmium-venv && ~/workspace/.tools/osmium-venv/bin/pip install osmium`.)

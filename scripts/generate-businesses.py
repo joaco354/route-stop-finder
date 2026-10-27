@@ -22,6 +22,7 @@ src/lib/live/suggestions.json (autocomplete index).
 """
 import json
 import math
+import os
 import re
 from collections import Counter
 
