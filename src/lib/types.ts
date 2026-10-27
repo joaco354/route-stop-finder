@@ -9,16 +9,22 @@ export interface City {
 
 export type StopCategory =
   | "restaurant"
+  | "fast_food"
   | "coffee"
   | "gas"
+  | "ev_charging"
   | "pharmacy"
   | "hotel"
   | "grocery"
+  | "convenience"
+  | "rest_area"
   | "other";
 
 export interface StopCandidate {
   id: string;
   name: string;
+  /** Chain/brand the business belongs to ("" or absent for independents). */
+  brand?: string;
   address: string;
   category: StopCategory;
   lat: number;

@@ -117,17 +117,40 @@ process). Driving times are estimates — no live traffic.
   self-hosted instance). Alternative: **openrouteservice** hosted
   (`ROUTING_PROVIDER=openrouteservice` + `ORS_API_KEY`, free Standard
   account; key is personal and server-side only). See `.env.example`.
-- **Businesses** — a local, verified OpenStreetMap dataset for the
-  corridor (`src/lib/live/businesses.ts`: McDonald's, Starbucks, gas
-  stations; © OpenStreetMap contributors, ODbL). Built once from
-  Overpass extracts with `scripts/build-corridor-dataset.py` +
-  `scripts/generate-businesses.py`; the app never queries Overpass at
-  runtime.
+- **Businesses** — a local OpenStreetMap dataset for the corridor
+  (`src/lib/live/businesses.json`, loaded by `businesses.ts`):
+  **19,382 businesses** — restaurants (7,200), fast food (4,078),
+  coffee shops (1,544), gas stations (1,770), convenience stores
+  (1,684), hotels/motels (1,088), grocery stores (914), pharmacies
+  (573), EV charging stations (475), and rest areas (56);
+  © OpenStreetMap contributors, ODbL. Categories are assigned from
+  OSM tags (amenity/shop/tourism/highway), never curated by brand, so
+  any chain or independent in the data is searchable by name, and
+  category searches span every brand. The app never queries Overpass
+  at runtime.
 - **Detours** — each finalist gets a real route-through calculation;
   ranking uses the unchanged scoring algorithm. Moving the time slider
   re-ranks the already-evaluated candidates in the browser — no extra
   routing calls.
 - Endpoint: `POST /api/live-find-stops`.
+
+### Refreshing the business dataset (monthly, manual)
+
+Businesses open and close, so refresh the dataset about once a month.
+It takes two commands and no code changes:
+
+```bash
+python3 scripts/build-corridor-dataset.py   # fetch Overpass extracts (~15 min; flaky mirrors retry automatically; groups already fetched are skipped — set RSF_FORCE_FETCH=1 to refetch all)
+python3 scripts/generate-businesses.py      # rebuild src/lib/live/businesses.json and print per-category counts
+npm run build                               # sanity-check the app with the new data
+```
+
+Then commit the regenerated `businesses.json`. The fetch uses one
+build-time Overpass query per category group along the saved corridor
+centerline (`scripts/corridor-route.json`); raw extracts land in the
+feasibility workspace, outside the repo. If a group fails on every
+mirror (the public Overpass servers are shared and busy), just rerun
+the script later — finished groups are not refetched.
 
 ## Performance & caching (Phase 2D)
 
@@ -138,6 +161,18 @@ Measured on the public Valhalla demo server (Boston → DC, one stop):
 | McDonald's @3h, cold | 7.7 s | 5.2 s (incl. a slow 2.1 s direct-route call) |
 | Starbucks @5h / gas @4h / McDonald's no-pref | 5.2–6.3 s | **2.1–2.2 s** |
 | Reverse DC → Boston @3h | 6.2 s | 2.5 s |
+
+Dataset-expansion addendum: with 19,382 businesses, a "restaurant"
+search matches 11,278 candidates. Candidate selection (matching +
+route projection) takes ~0.26 s thanks to a coarse segment grid —
+each business is only projected onto the route segments in its
+neighborhood — and end-to-end search time is unchanged (~2.2 s, still
+bounded by the routing provider's route-through calls). Repeat
+searches remain <0.05 s from cache. Search matching itself is
+data-driven: brand queries resolve against the brands present in the
+dataset (punctuation-insensitive, one-typo tolerant), category
+queries map to OSM-derived categories ("restaurant" includes fast
+food), and neither ever mixes a competing brand into a brand search.
 | Any repeat search within 10 min | 5.4–5.8 s | **< 0.05 s, zero API calls** |
 
 How: finalist detour calls run concurrently (max 4 in flight); 12

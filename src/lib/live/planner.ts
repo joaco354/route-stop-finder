@@ -27,8 +27,11 @@ import { derivePlan, type EvaluatedStopData } from "./derive";
  *
  * Pipeline per search:
  *  1. Direct route from the configured routing provider (cached).
- *  2. Businesses for each query come from the local, verified OSM
- *     corridor dataset — never from live Overpass queries.
+ *  2. Businesses for each query come from the local OSM corridor
+ *     dataset (businesses.json — all food, fuel, charging, pharmacy,
+ *     grocery, convenience, lodging and rest-area features along the
+ *     corridor, categories assigned from OSM tags) — never from live
+ *     Overpass queries.
  *  3. Candidates are projected onto the route geometry ("when would we
  *     pass it?") and pre-filtered; the finalists get a REAL route-through
  *     calculation (origin → … → candidate → destination) whose legs give
@@ -102,6 +105,7 @@ function businessAsCandidate(b: LiveBusiness): StopCandidate {
   return {
     id: b.id,
     name: b.name,
+    brand: b.brand,
     address: b.address,
     category: b.category,
     lat: b.lat,
@@ -120,14 +124,25 @@ const BUSINESS_BY_ID = new Map(CORRIDOR_BUSINESSES.map((b) => [b.id, b]));
  * Phase 2D validation against the full 11,672-point path: max error
  * 0.03 min along-route and 0.38 km off-route (mean 0.013 km) — safe for
  * a prefilter whose finalists all get real route-through calculations.
+ *
+ * Also builds a coarse segment grid so projecting tens of thousands of
+ * dataset businesses only tests the segments near each business
+ * (dataset expansion: a "restaurant" search matches ~20k places; a
+ * full scan per business would take seconds). Cell 0.12° ≈ 13 × 10 km;
+ * the 3×3 neighborhood around a point always covers the 8 km
+ * off-route filter plus the longest decimated segment.
  */
-function decimateForProjection(route: RouteResult): {
+const GRID_CELL_DEG = 0.12;
+
+interface Projection {
   path: [number, number][];
   cumulativeMinutes: number[];
-} {
+  grid: Map<string, number[]>;
+}
+
+function decimateForProjection(route: RouteResult): Projection {
   const n = route.path.length;
   const stride = Math.max(1, Math.ceil(n / 3000));
-  if (stride === 1) return { path: route.path, cumulativeMinutes: route.cumulativeMinutes };
   const path: [number, number][] = [];
   const cumulativeMinutes: number[] = [];
   for (let i = 0; i < n; i += stride) {
@@ -138,18 +153,41 @@ function decimateForProjection(route: RouteResult): {
     path.push(route.path[n - 1]);
     cumulativeMinutes.push(route.cumulativeMinutes[n - 1]);
   }
-  return { path, cumulativeMinutes };
+  const grid = new Map<string, number[]>();
+  for (let i = 1; i < path.length; i++) {
+    const midLat = (path[i - 1][0] + path[i][0]) / 2;
+    const midLng = (path[i - 1][1] + path[i][1]) / 2;
+    const key = `${Math.floor(midLat / GRID_CELL_DEG)},${Math.floor(midLng / GRID_CELL_DEG)}`;
+    const cell = grid.get(key);
+    if (cell) cell.push(i);
+    else grid.set(key, [i]);
+  }
+  return { path, cumulativeMinutes, grid };
 }
 
 /** Project a point onto the route path: along-route minutes + off-route km. */
 function projectOntoRoute(
-  proj: { path: [number, number][]; cumulativeMinutes: number[] },
+  proj: Projection,
   lat: number,
   lng: number,
 ): { alongMinutes: number; offRouteKm: number } {
   const path = proj.path;
+  // Candidate segments: the point's grid cell + neighbors. Falls back
+  // to every segment when the point is far outside the gridded area.
+  let indices: number[] | undefined;
+  const cx = Math.floor(lat / GRID_CELL_DEG);
+  const cy = Math.floor(lng / GRID_CELL_DEG);
+  const gathered: number[] = [];
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const cell = proj.grid.get(`${cx + dx},${cy + dy}`);
+      if (cell) gathered.push(...cell);
+    }
+  }
+  indices = gathered.length > 0 ? gathered : undefined;
+
   let best = { distKm: Infinity, along: 0 };
-  for (let i = 1; i < path.length; i++) {
+  const scan = (i: number) => {
     const [aLat, aLng] = path[i - 1];
     const [bLat, bLng] = path[i];
     // Local equirectangular projection (km) around the segment.
@@ -169,6 +207,11 @@ function projectOntoRoute(
       const t1 = proj.cumulativeMinutes[i];
       best = { distKm: d, along: t0 + (t1 - t0) * t };
     }
+  };
+  if (indices) {
+    for (const i of indices) scan(i);
+  } else {
+    for (let i = 1; i < path.length; i++) scan(i);
   }
   return { alongMinutes: best.along, offRouteKm: best.distKm };
 }

@@ -104,52 +104,199 @@ function brandKeyOf(stop: StopCandidate): string | null {
   return null;
 }
 
-const CATEGORY_TERMS: Record<string, StopCategory> = {
-  gas: "gas",
-  "gas station": "gas",
-  "gas stations": "gas",
-  fuel: "gas",
-  petrol: "gas",
-  coffee: "coffee",
-  "coffee shop": "coffee",
-  "coffee shops": "coffee",
-  cafe: "coffee",
-  espresso: "coffee",
-  restaurant: "restaurant",
-  restaurants: "restaurant",
-  food: "restaurant",
-  "fast food": "restaurant",
-  burger: "restaurant",
-  burgers: "restaurant",
-  pharmacy: "pharmacy",
-  pharmacies: "pharmacy",
-  drugstore: "pharmacy",
-  "drug store": "pharmacy",
-  hotel: "hotel",
-  hotels: "hotel",
-  motel: "hotel",
-  motels: "hotel",
-  lodging: "hotel",
-  grocery: "grocery",
-  groceries: "grocery",
-  "grocery store": "grocery",
-  "grocery stores": "grocery",
-  supermarket: "grocery",
-  supermarkets: "grocery",
-  market: "grocery",
+/**
+ * Search normalization — punctuation- and spacing-insensitive so common
+ * spellings converge: "Chick-fil-A" = "chikfila" = "chick fil a",
+ * "Dunkin'" = "dunkin donuts" prefix-wise, "Joe's Diner" = "joes diner".
+ * Deliberately simple: lowercase, drop apostrophes, turn every other
+ * punctuation run into nothing, collapse spaces.
+ */
+export function normalizeSearchText(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+/** Compact form (spaces removed) for brand comparisons: "taco bell" → "tacobell". */
+function compactOf(s: string): string {
+  return s.replace(/\s+/g, "");
+}
+
+interface NormalizedStop {
+  brand: string;
+  name: string;
+}
+const normalizedCache = new WeakMap<StopCandidate, NormalizedStop>();
+
+function normalizedOf(stop: StopCandidate): NormalizedStop {
+  let hit = normalizedCache.get(stop);
+  if (!hit) {
+    const rawBrand = stop.brand?.trim() ? stop.brand : brandKeyOf(stop) ?? "";
+    hit = {
+      brand: compactOf(normalizeSearchText(rawBrand)),
+      name: compactOf(normalizeSearchText(stop.name)),
+    };
+    normalizedCache.set(stop, hit);
+  }
+  return hit;
+}
+
+/**
+ * Data-driven brand match: if the query names a brand that actually
+ * exists among the candidates (exact normalized brand, a business whose
+ * name IS the query, or a unique brand the query unambiguously
+ * prefixes/extends), return only that brand's locations. This is what
+ * lets any chain in the dataset be found without a curated alias list —
+ * while still never mixing in a competing brand.
+ */
+function findBrandMatches(
+  stops: StopCandidate[],
+  qCompact: string,
+): StopCandidate[] | null {
+  if (!qCompact) return null;
+  const exact = stops.filter((s) => {
+    const n = normalizedOf(s);
+    return (n.brand !== "" && n.brand === qCompact) || n.name === qCompact;
+  });
+  if (exact.length > 0) return exact;
+
+  if (qCompact.length >= 4) {
+    const brands = new Set<string>();
+    for (const s of stops) {
+      const b = normalizedOf(s).brand;
+      if (b) brands.add(b);
+    }
+    const byBrand = (brand: string) =>
+      stops.filter((s) => {
+        const n = normalizedOf(s);
+        return n.brand === brand || n.name === brand;
+      });
+    const related = [...brands].filter(
+      (b) => b.startsWith(qCompact) || qCompact.startsWith(b),
+    );
+    if (related.length === 1) return byBrand(related[0]);
+
+    // One typo away from exactly one brand ("chikfila" → Chick-fil-A).
+    // Deliberately capped at a single edit — this is a spelling nudge,
+    // not a fuzzy search engine.
+    if (qCompact.length >= 6) {
+      const near = [...brands].filter(
+        (b) => Math.abs(b.length - qCompact.length) <= 1 && withinOneEdit(b, qCompact),
+      );
+      if (near.length === 1) return byBrand(near[0]);
+    }
+  }
+  return null;
+}
+
+/** Levenshtein distance ≤ 1 (one substitution, insertion, or deletion). */
+function withinOneEdit(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  let i = 0;
+  let j = 0;
+  let edits = 0;
+  while (i < shorter.length && j < longer.length) {
+    if (shorter[i] === longer[j]) {
+      i++;
+      j++;
+    } else {
+      edits++;
+      if (edits > 1) return false;
+      if (shorter.length === longer.length) i++;
+      j++;
+    }
+  }
+  return edits + (longer.length - j) <= 1;
+}
+
+/**
+ * Category terms map a general query to the dataset categories it
+ * covers. "restaurant" is deliberately broad — travelers asking for a
+ * restaurant mean places to eat, so it includes fast food. Narrower
+ * terms ("fast food", "cafe") map to just their category.
+ */
+const CATEGORY_TERMS: Record<string, StopCategory[]> = {
+  gas: ["gas"],
+  "gas station": ["gas"],
+  "gas stations": ["gas"],
+  fuel: ["gas"],
+  petrol: ["gas"],
+  coffee: ["coffee"],
+  "coffee shop": ["coffee"],
+  "coffee shops": ["coffee"],
+  cafe: ["coffee"],
+  espresso: ["coffee"],
+  restaurant: ["restaurant", "fast_food"],
+  restaurants: ["restaurant", "fast_food"],
+  diner: ["restaurant", "fast_food"],
+  diners: ["restaurant", "fast_food"],
+  food: ["restaurant", "fast_food"],
+  "fast food": ["fast_food"],
+  burger: ["fast_food", "restaurant"],
+  burgers: ["fast_food", "restaurant"],
+  pharmacy: ["pharmacy"],
+  pharmacies: ["pharmacy"],
+  drugstore: ["pharmacy"],
+  "drug store": ["pharmacy"],
+  hotel: ["hotel"],
+  hotels: ["hotel"],
+  motel: ["hotel"],
+  motels: ["hotel"],
+  lodging: ["hotel"],
+  grocery: ["grocery"],
+  groceries: ["grocery"],
+  "grocery store": ["grocery"],
+  "grocery stores": ["grocery"],
+  supermarket: ["grocery"],
+  supermarkets: ["grocery"],
+  market: ["grocery"],
+  "convenience store": ["convenience"],
+  "convenience stores": ["convenience"],
+  "ev charging": ["ev_charging"],
+  "ev charging station": ["ev_charging"],
+  "ev charger": ["ev_charging"],
+  "charging station": ["ev_charging"],
+  charging: ["ev_charging"],
+  "rest area": ["rest_area"],
+  "rest areas": ["rest_area"],
+  "rest stop": ["rest_area"],
+  "rest stops": ["rest_area"],
 };
 
 export function matchStops(stops: StopCandidate[], rawQuery: string): StopCandidate[] {
   const q = rawQuery.trim().toLowerCase().replace(/\s+/g, " ");
   if (!q) return stops;
 
-  const brand = BRAND_ALIASES[q];
-  if (brand) return stops.filter((s) => brandKeyOf(s) === brand);
+  // 1a. Curated brand aliases (sample-data brands and common spellings).
+  const aliasBrand = BRAND_ALIASES[q];
+  if (aliasBrand) {
+    const byAlias = stops.filter((s) => brandKeyOf(s) === aliasBrand);
+    if (byAlias.length > 0) return byAlias;
+    // Fall through to the data-driven pass when the alias names a brand
+    // the candidate set carries only in its data (live dataset brands).
+  }
 
-  const category = CATEGORY_TERMS[q];
-  if (category) return stops.filter((s) => s.category === category);
+  // 2. Category terms (possibly several dataset categories). Category
+  //    intent wins over brand/name coincidences: "hotel" must return
+  //    every hotel, not the one business literally named "Hotel".
+  const categories = CATEGORY_TERMS[q] ?? CATEGORY_TERMS[normalizeSearchText(q)];
+  if (categories) {
+    const set = new Set(categories);
+    return stops.filter((s) => set.has(s.category));
+  }
 
-  return stops.filter((s) => s.name.toLowerCase().includes(q));
+  // 1b. Data-driven brand match against the candidates themselves.
+  const qNormalized = normalizeSearchText(q);
+  const brandMatches = findBrandMatches(stops, compactOf(qNormalized));
+  if (brandMatches) return brandMatches;
+
+  // 3. Name search — normalized substring ("joes diner" finds "Joe's Diner").
+  const qName = compactOf(qNormalized);
+  return stops.filter((s) => normalizedOf(s).name.includes(qName));
 }
 
 /** Friendly message when a route or business isn't in the sample data yet.
