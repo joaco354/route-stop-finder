@@ -1,6 +1,8 @@
 import type { City } from "./types";
 
-/** Small built-in city list used for autocomplete and the generic fallback route.
+/** Small built-in city list used for autocomplete and for resolving the
+ *  curated sample corridors (see sampleData.ts). Routes between listed
+ *  cities without a curated corridor are reported as unsupported.
  *  A live version would use Google Places Autocomplete instead. */
 export const CITIES: City[] = [
   { name: "Boston, MA", shortName: "Boston", lat: 42.3601, lng: -71.0589 },

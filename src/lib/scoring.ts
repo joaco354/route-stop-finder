@@ -1,7 +1,6 @@
-import { haversineMiles, resolveCity } from "./cities";
+import { resolveCity } from "./cities";
 import { findCorridorAnyDirection } from "./sampleData";
 import type {
-  City,
   FindMultiStopsInput,
   FindStopsInput,
   FindStopsResult,
@@ -10,6 +9,7 @@ import type {
   RankedStop,
   RouteInfo,
   StopCandidate,
+  StopCategory,
   StopPlanEntry,
 } from "./types";
 
@@ -57,111 +57,120 @@ export function formatDuration(minutes: number): string {
   return `${h}h ${rest}m`;
 }
 
-function matchesQuery(stop: StopCandidate, rawQuery: string): boolean {
-  const q = rawQuery.trim().toLowerCase();
-  if (!q) return true;
-  if (stop.name.toLowerCase().includes(q)) return true;
-  return stop.matchTerms.some((t) => t === q || t.includes(q) || q.includes(t));
-}
-
-const CATEGORY_LABELS: Record<string, string> = {
-  "gas station": "Gas Station",
-  gas: "Gas Station",
-  coffee: "Coffee Shop",
-  hotel: "Hotel",
-  pharmacy: "Pharmacy",
-  grocery: "Grocery Store",
-  groceries: "Grocery Store",
-  restaurant: "Restaurant",
+/**
+ * SEARCH MATCHING — brand-exact first, then category, then name.
+ *
+ * 1. If the query names a known BRAND (McDonald's, Walgreens, Shell, …),
+ *    ONLY that brand's locations match. A brand search must never return a
+ *    competing brand: searching "Walgreens" returns Walgreens only, never CVS.
+ * 2. Else, if the query is a general CATEGORY ("gas station", "hotel",
+ *    "pharmacy", …), every business in that category matches — multiple
+ *    brands included, as expected for a category search.
+ * 3. Else, fall back to a plain name search (e.g. a specific business name).
+ *
+ * No match means the business isn't in the sample data — callers surface a
+ * friendly "live search coming soon" message instead of invented results.
+ */
+const BRAND_ALIASES: Record<string, string> = {
+  "mcdonald's": "mcdonald's",
+  mcdonalds: "mcdonald's",
+  mcdonald: "mcdonald's",
+  starbucks: "starbucks",
+  dunkin: "dunkin'",
+  "dunkin'": "dunkin'",
+  shell: "shell",
+  bp: "bp",
+  cvs: "cvs",
+  walgreens: "walgreens",
+  marriott: "marriott",
+  hilton: "hilton",
+  omni: "omni",
+  "stop & shop": "stop & shop",
+  "stop and shop": "stop & shop",
+  shoprite: "shoprite",
+  ralphs: "ralphs",
 };
 
-function interpolate(path: [number, number][], fraction: number): [number, number] {
-  // Walk the polyline by segment length and return the point at `fraction` of the way.
-  const dists: number[] = [];
-  let total = 0;
-  for (let i = 1; i < path.length; i++) {
-    const d = Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]);
-    dists.push(d);
-    total += d;
+const KNOWN_BRANDS: string[] = [...new Set(Object.values(BRAND_ALIASES))];
+
+/** The brand a stop belongs to, derived from its business name
+ *  ("CVS Pharmacy — Stamford" → "cvs", "Stamford Marriott Hotel" → "marriott").
+ *  Null for independent businesses that carry no known brand. */
+function brandKeyOf(stop: StopCandidate): string | null {
+  const segment = (stop.name.split("—")[0] ?? stop.name).trim().toLowerCase();
+  for (const brand of KNOWN_BRANDS) {
+    if (segment.includes(brand)) return brand;
   }
-  let target = total * fraction;
-  for (let i = 0; i < dists.length; i++) {
-    if (target <= dists[i]) {
-      const t = dists[i] === 0 ? 0 : target / dists[i];
-      return [
-        path[i][0] + (path[i + 1][0] - path[i][0]) * t,
-        path[i][1] + (path[i + 1][1] - path[i][1]) * t,
-      ];
-    }
-    target -= dists[i];
-  }
-  return path[path.length - 1];
+  return null;
 }
 
-/** Generic candidates for routes/queries without curated sample data:
- *  three stops at ~30% / ~50% / ~70% of the trip, so the preferred-time
- *  slider still has something sensible to rank. */
-function genericCandidates(
-  route: RouteInfo,
-  query: string,
-  preferredStopMinutes: number | null | undefined,
-): StopCandidate[] {
-  const label = CATEGORY_LABELS[query.trim().toLowerCase()] ?? query.trim();
-  const center =
-    preferredStopMinutes != null && route.durationMinutes > 0
-      ? Math.min(0.85, Math.max(0.15, preferredStopMinutes / route.durationMinutes))
-      : 0.5;
-  const fractions = [center - 0.18, center, center + 0.18].map((f) =>
-    Math.min(0.9, Math.max(0.1, f)),
-  );
-  return fractions.map((f, i) => {
-    const [lat, lng] = interpolate(route.path, f);
-    return {
-      id: `generic-${i}`,
-      name: `${label} — Mile ${Math.round(route.distanceMiles * f)} (sample)`,
-      address: `Sample stop near mile ${Math.round(route.distanceMiles * f)} on the route from ${route.origin.shortName} to ${route.destination.shortName}`,
-      category: "other" as const,
-      lat,
-      lng,
-      minutesFromStart: Math.round(route.durationMinutes * f),
-      detourMinutes: 3 + i * 3,
-      matchTerms: [query.trim().toLowerCase()],
-    };
-  });
+const CATEGORY_TERMS: Record<string, StopCategory> = {
+  gas: "gas",
+  "gas station": "gas",
+  "gas stations": "gas",
+  fuel: "gas",
+  petrol: "gas",
+  coffee: "coffee",
+  "coffee shop": "coffee",
+  "coffee shops": "coffee",
+  cafe: "coffee",
+  espresso: "coffee",
+  restaurant: "restaurant",
+  restaurants: "restaurant",
+  food: "restaurant",
+  "fast food": "restaurant",
+  burger: "restaurant",
+  burgers: "restaurant",
+  pharmacy: "pharmacy",
+  pharmacies: "pharmacy",
+  drugstore: "pharmacy",
+  "drug store": "pharmacy",
+  hotel: "hotel",
+  hotels: "hotel",
+  motel: "hotel",
+  motels: "hotel",
+  lodging: "hotel",
+  grocery: "grocery",
+  groceries: "grocery",
+  "grocery store": "grocery",
+  "grocery stores": "grocery",
+  supermarket: "grocery",
+  supermarkets: "grocery",
+  market: "grocery",
+};
+
+export function matchStops(stops: StopCandidate[], rawQuery: string): StopCandidate[] {
+  const q = rawQuery.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!q) return stops;
+
+  const brand = BRAND_ALIASES[q];
+  if (brand) return stops.filter((s) => brandKeyOf(s) === brand);
+
+  const category = CATEGORY_TERMS[q];
+  if (category) return stops.filter((s) => s.category === category);
+
+  return stops.filter((s) => s.name.toLowerCase().includes(q));
 }
 
-function buildGenericRoute(origin: City, destination: City): RouteInfo {
-  const straightMiles = haversineMiles(origin, destination);
-  const roadMiles = Math.round(straightMiles * 1.25);
-  // Rough highway estimate: ~55 mph average including slowdowns.
-  const durationMinutes = Math.round((roadMiles / 55) * 60);
-  const path: [number, number][] = [
-    [origin.lat, origin.lng],
-    [
-      (origin.lat + destination.lat) / 2 + (destination.lng - origin.lng) * 0.03,
-      (origin.lng + destination.lng) / 2,
-    ],
-    [destination.lat, destination.lng],
-  ];
-  return {
-    origin,
-    destination,
-    durationMinutes,
-    distanceMiles: roadMiles,
-    path,
-    isSampleCorridor: false,
-  };
+/** Friendly message when a route or business isn't in the sample data yet.
+ *  We never invent businesses, addresses, or detour times. */
+export const UNSUPPORTED_ROUTE_MESSAGE =
+  "That route isn't covered by our sample data yet — live search is coming soon, so we can't suggest stops for it just yet.";
+
+export function unsupportedBusinessMessage(query: string): string {
+  const label = query.trim() || "that stop";
+  return `We don't have any “${label}” in our sample data along this route yet — live search is coming soon.`;
 }
 
 interface ResolvedRoute {
   route: RouteInfo;
-  corridor: ReturnType<typeof findCorridorAnyDirection>;
+  corridor: NonNullable<ReturnType<typeof findCorridorAnyDirection>>;
 }
 
 function resolveRoute(
   originInput: string,
   destinationInput: string,
-): ResolvedRoute | { error: string } {
+): ResolvedRoute | { error: string } | { unsupported: string } {
   const origin = resolveCity(originInput);
   const destination = resolveCity(destinationInput);
   if (!origin || !destination) {
@@ -175,42 +184,43 @@ function resolveRoute(
   }
 
   const corridor = findCorridorAnyDirection(origin, destination);
-  const route: RouteInfo = corridor
-    ? {
-        origin,
-        destination,
-        durationMinutes: corridor.durationMinutes,
-        distanceMiles: corridor.distanceMiles,
-        path: corridor.path,
-        isSampleCorridor: true,
-      }
-    : buildGenericRoute(origin, destination);
-  return { route, corridor };
-}
-
-/** Candidates for one query on a resolved route: curated corridor matches,
- *  or the generic fallback when the corridor has none. */
-function candidatesForQuery(
-  resolved: ResolvedRoute,
-  query: string,
-  preferredStopMinutes: number | null | undefined,
-): StopCandidate[] {
-  const { route, corridor } = resolved;
-  let candidates: StopCandidate[] = corridor
-    ? corridor.stops.filter((s) => matchesQuery(s, query))
-    : [];
-
-  if (candidates.length === 0) {
-    candidates = genericCandidates(route, query || "Stop", preferredStopMinutes);
+  if (!corridor) {
+    // No curated sample corridor for this route. Previously the app invented
+    // a straight-line route with fictional stops — that behavior is removed:
+    // unsupported routes get an honest "coming soon" message instead.
+    return { unsupported: UNSUPPORTED_ROUTE_MESSAGE };
   }
-  return candidates;
+  return {
+    route: {
+      origin,
+      destination,
+      durationMinutes: corridor.durationMinutes,
+      distanceMiles: corridor.distanceMiles,
+      path: corridor.path,
+      isSampleCorridor: true,
+    },
+    corridor,
+  };
 }
 
-export function findStops(input: FindStopsInput): FindStopsResult | { error: string } {
+/** Candidates for one query on a resolved route: curated corridor matches
+ *  only. An empty result means the business isn't supported by the sample
+ *  data — there is deliberately NO generic/fictional fallback. */
+function candidatesForQuery(resolved: ResolvedRoute, query: string): StopCandidate[] {
+  return matchStops(resolved.corridor.stops, query);
+}
+
+export function findStops(
+  input: FindStopsInput,
+): FindStopsResult | { error: string } | { unsupported: string } {
   const resolved = resolveRoute(input.origin, input.destination);
   if ("error" in resolved) return resolved;
+  if ("unsupported" in resolved) return resolved;
 
-  const candidates = candidatesForQuery(resolved, input.query, input.preferredStopMinutes);
+  const candidates = candidatesForQuery(resolved, input.query);
+  if (candidates.length === 0) {
+    return { unsupported: unsupportedBusinessMessage(input.query) };
+  }
   const ranked = rankStops(
     candidates,
     resolved.route.durationMinutes,
@@ -248,9 +258,10 @@ export const MIN_STOP_GAP_MINUTES = 10;
 export function findMultiStops(
   input: FindMultiStopsInput,
   overrides: Array<string | null> = [],
-): MultiStopResult | { error: string } {
+): MultiStopResult | { error: string } | { unsupported: string } {
   const resolved = resolveRoute(input.origin, input.destination);
   if ("error" in resolved) return resolved;
+  if ("unsupported" in resolved) return resolved;
   const { route } = resolved;
 
   const requests = input.stops.slice(0, MAX_STOPS);
@@ -272,7 +283,24 @@ export function findMultiStops(
   requests.forEach((req, i) => {
     const preferred = req.preferredStopMinutes ?? null;
     const threshold = i === 0 ? 0 : prevChosenMinutes + MIN_STOP_GAP_MINUTES;
-    const all = candidatesForQuery(resolved, req.query, preferred);
+    const all = candidatesForQuery(resolved, req.query);
+
+    if (all.length === 0) {
+      // Business not in the sample data for this route — friendly notice,
+      // never an invented location.
+      drafts.push({
+        entry: {
+          query: req.query,
+          preferredStopMinutes: preferred,
+          error: unsupportedBusinessMessage(req.query),
+        },
+        rankedEligible: [],
+        chosenRaw: null,
+        earlierDetours,
+      });
+      return;
+    }
+
     const eligible = all.filter((s) => s.minutesFromStart > threshold);
 
     if (eligible.length === 0) {

@@ -57,6 +57,9 @@ export async function POST(req: NextRequest) {
     if ("error" in result) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
+    if ("unsupported" in result) {
+      return NextResponse.json({ unsupported: result.unsupported });
+    }
     return NextResponse.json(result);
   }
 
@@ -72,6 +75,9 @@ function handleSingle(input: FindStopsInput) {
   const result = findStops(input);
   if ("error" in result) {
     return NextResponse.json({ error: result.error }, { status: 400 });
+  }
+  if ("unsupported" in result) {
+    return NextResponse.json({ unsupported: result.unsupported });
   }
   return NextResponse.json(result);
 }

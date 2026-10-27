@@ -27,6 +27,8 @@ export default function HomePage() {
   const [overrides, setOverrides] = useState<Array<string | null>>([null]);
   const [result, setResult] = useState<MultiStopResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Friendly "not covered by sample data yet" message (not an error). */
+  const [notice, setNotice] = useState<string | null>(null);
 
   const runSearch = useCallback(
     (nextStops: StopRequest[] = stops, nextOverrides: Array<string | null> = overrides) => {
@@ -36,10 +38,18 @@ export default function HomePage() {
       );
       if ("error" in res) {
         setError(res.error);
+        setNotice(null);
+        setResult(null);
+        return;
+      }
+      if ("unsupported" in res) {
+        setNotice(res.unsupported);
+        setError(null);
         setResult(null);
         return;
       }
       setError(null);
+      setNotice(null);
       setResult(res);
     },
     [origin, destination, stops, overrides],
@@ -57,6 +67,12 @@ export default function HomePage() {
     const nextOverrides = overrides.map((o, i) => (i === index ? null : o));
     setStops(nextStops);
     setOverrides(nextOverrides);
+    // Moving the preferred-time slider (or clearing / setting it) re-ranks
+    // IMMEDIATELY — recommendations, highlight and map follow the slider
+    // without waiting for the Find button. Query text still applies on submit.
+    if ("preferredStopMinutes" in patch) {
+      runSearch(nextStops, nextOverrides);
+    }
   };
 
   const addStop = () => {
@@ -131,6 +147,11 @@ export default function HomePage() {
             {error && (
               <p role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">
                 {error}
+              </p>
+            )}
+            {notice && (
+              <p role="status" className="mt-3 rounded-xl bg-sky-50 p-3 text-sm text-sky-800">
+                {notice}
               </p>
             )}
           </section>
