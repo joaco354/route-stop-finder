@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import ResultsCard from "@/components/ResultsCard";
 import SearchPanel from "@/components/SearchPanel";
 import type { MapAlternative } from "@/components/MapView";
+import { resolveCity } from "@/lib/cities";
+import { derivePlan, type EvaluatedStopData } from "@/lib/live/derive";
 import { findMultiStops, formatDuration, MAX_STOPS } from "@/lib/scoring";
 import type { MultiStopResult, PlannedStop, StopRequest } from "@/lib/types";
 
@@ -19,6 +21,27 @@ const MapView = dynamic(() => import("@/components/MapView"), {
 
 const INITIAL_STOPS: StopRequest[] = [{ query: "McDonald's", preferredStopMinutes: 180 }];
 
+/** Routes with REAL data (Phase 2C): Boston ↔ Washington, DC only. */
+function isLivePair(origin: string, destination: string): boolean {
+  const a = resolveCity(origin);
+  const b = resolveCity(destination);
+  if (!a || !b) return false;
+  return [a.shortName, b.shortName].sort().join("|") === "Boston|Washington";
+}
+
+interface LiveDataState extends EvaluatedStopData {
+  provider: { id: string; label: string };
+  stopMessages: string[];
+}
+
+/** Attach honest per-stop messages (e.g. unsupported business) to a derived plan. */
+function applyLiveMessages(plan: MultiStopResult, stopMessages: string[]): MultiStopResult {
+  plan.stops = plan.stops.map((entry, i) =>
+    stopMessages[i] && !entry.chosen ? { ...entry, error: stopMessages[i] } : entry,
+  );
+  return plan;
+}
+
 export default function HomePage() {
   const [origin, setOrigin] = useState("Boston, MA");
   const [destination, setDestination] = useState("Washington, DC");
@@ -29,9 +52,59 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
   /** Friendly "not covered by sample data yet" message (not an error). */
   const [notice, setNotice] = useState<string | null>(null);
+  /** Evaluated REAL-data plan material (Boston ↔ DC), when available. */
+  const [liveData, setLiveData] = useState<LiveDataState | null>(null);
+  const [liveLoading, setLiveLoading] = useState(false);
+
+  /** Fetch a live plan from the server. On failure: show the reason and
+   *  NO results — live mode never silently substitutes sample data. */
+  const fetchLive = useCallback(
+    async (nextStops: StopRequest[], nextOverrides: Array<string | null>) => {
+      setLiveLoading(true);
+      try {
+        const res = await fetch("/api/live-find-stops", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ origin, destination, stops: nextStops, overrides: nextOverrides }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          setError(json.error ?? "Live routing failed.");
+          setNotice(null);
+          setResult(null);
+          setLiveData(null);
+          return;
+        }
+        const data: LiveDataState = {
+          route: json.route,
+          candidatesByStop: json.candidatesByStop,
+          provider: json.provider,
+          stopMessages: json.stopMessages ?? [],
+        };
+        setLiveData(data);
+        setError(null);
+        setNotice(null);
+        setResult(applyLiveMessages(derivePlan(data, nextStops, nextOverrides), data.stopMessages));
+      } catch {
+        setError(
+          "Live routing is unreachable right now, so no results are shown — sample data is never presented as live data.",
+        );
+        setNotice(null);
+        setResult(null);
+        setLiveData(null);
+      } finally {
+        setLiveLoading(false);
+      }
+    },
+    [origin, destination],
+  );
 
   const runSearch = useCallback(
     (nextStops: StopRequest[] = stops, nextOverrides: Array<string | null> = overrides) => {
+      if (isLivePair(origin, destination)) {
+        void fetchLive(nextStops, nextOverrides);
+        return;
+      }
       const res = findMultiStops(
         { origin, destination, stops: nextStops },
         nextOverrides,
@@ -52,7 +125,7 @@ export default function HomePage() {
       setNotice(null);
       setResult(res);
     },
-    [origin, destination, stops, overrides],
+    [origin, destination, stops, overrides, fetchLive],
   );
 
   // Auto-run the Boston → Washington, DC example on first load.
@@ -71,7 +144,20 @@ export default function HomePage() {
     // IMMEDIATELY — recommendations, highlight and map follow the slider
     // without waiting for the Find button. Query text still applies on submit.
     if ("preferredStopMinutes" in patch) {
-      runSearch(nextStops, nextOverrides);
+      if (isLivePair(origin, destination)) {
+        // Live mode: re-rank the already-evaluated real candidates locally.
+        // No external API calls for slider movement (Phase 2C, Step 6).
+        if (liveData) {
+          setResult(
+            applyLiveMessages(
+              derivePlan(liveData, nextStops, nextOverrides),
+              liveData.stopMessages,
+            ),
+          );
+        }
+      } else {
+        runSearch(nextStops, nextOverrides);
+      }
     }
   };
 
@@ -102,6 +188,9 @@ export default function HomePage() {
     () => (result ? result.stops.flatMap((s) => (s.chosen ? [s.chosen] : [])) : []),
     [result],
   );
+
+  /** True when the current inputs are the live corridor AND live data loaded. */
+  const liveActive = isLivePair(origin, destination) && liveData != null;
 
   const mapAlternatives: MapAlternative[] = useMemo(
     () =>
@@ -138,11 +227,22 @@ export default function HomePage() {
               onRemoveStop={removeStop}
               onSubmit={() => runSearch()}
             />
+            {liveLoading && (
+              <p className="mt-3 text-center text-sm text-slate-500">Loading live route…</p>
+            )}
             {result && (
-              <p className="mt-3 text-center text-sm text-slate-500">
-                Direct trip: {formatDuration(result.route.durationMinutes)} · {result.route.distanceMiles} mi
-                {!result.route.isSampleCorridor && " (estimated)"}
-              </p>
+              <>
+                <p className="mt-3 text-center text-xs font-semibold">
+                  {liveActive ? (
+                    <span className="text-emerald-600">● Live data — {liveData!.provider.label}</span>
+                  ) : (
+                    <span className="text-slate-400">Sample data</span>
+                  )}
+                </p>
+                <p className="mt-1 text-center text-sm text-slate-500">
+                  Direct trip: {formatDuration(result.route.durationMinutes)} · {result.route.distanceMiles} mi
+                </p>
+              </>
             )}
             {error && (
               <p role="alert" className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">
@@ -174,7 +274,10 @@ export default function HomePage() {
             onSelectAlternative={selectAlternative}
           />
           <p className="mt-2 text-center text-xs text-slate-400">
-            Dashed = direct route · Blue = route via your stops (numbered, in order) · Sample data for the prototype
+            Dashed = direct route · Blue = route via your stops (numbered, in order) ·{" "}
+            {liveActive
+              ? "Live route — Valhalla · Business data © OpenStreetMap contributors (ODbL)"
+              : "Sample data for the prototype"}
           </p>
         </section>
       </div>

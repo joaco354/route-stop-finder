@@ -96,20 +96,42 @@ prototype, not live listings. The search works for **any** stop type or brand,
 not only McDonald's — try the quick chips (Starbucks, gas station, coffee,
 hotel, pharmacy, grocery) or type your own.
 
+## Live data (Phase 2C — Boston ↔ Washington, DC)
+
+Boston ↔ Washington, DC now runs on REAL data; every other route still
+uses the sample data above, and the UI labels which mode you are in
+("● Live data" vs "Sample data"). Live mode never falls back to sample
+results silently — if live routing is unavailable you get an explanation
+instead of results.
+
+- **Routing** — provider-independent adapter in `src/lib/routing/`
+  (`RoutingProvider` interface). Default: **Valhalla** public demo server
+  (keyless, development/testing only — set `VALHALLA_BASE_URL` for a
+  self-hosted instance). Alternative: **openrouteservice** hosted
+  (`ROUTING_PROVIDER=openrouteservice` + `ORS_API_KEY`, free Standard
+  account; key is personal and server-side only). See `.env.example`.
+- **Businesses** — a local, verified OpenStreetMap dataset for the
+  corridor (`src/lib/live/businesses.ts`: McDonald's, Starbucks, gas
+  stations; © OpenStreetMap contributors, ODbL). Built once from
+  Overpass extracts with `scripts/build-corridor-dataset.py` +
+  `scripts/generate-businesses.py`; the app never queries Overpass at
+  runtime.
+- **Detours** — each finalist gets a real route-through calculation;
+  ranking uses the unchanged scoring algorithm. Moving the time slider
+  re-ranks the already-evaluated candidates in the browser — no extra
+  routing calls.
+- Endpoint: `POST /api/live-find-stops`.
+
 ## Roadmap: live data + deployment
 
-1. **Google Maps Platform** — add a key to `.env.local`
-   (see `.env.example`: `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=`), then implement
-   the stubs in `src/lib/googleMaps.ts`:
-   - Directions/Routes API → real polyline + duration (server-side, via the
-     `/api/find-stops` route, so the key stays off the client where possible).
-   - Places API → real candidates along the route; compute each detour with
-     Directions and rank with the unchanged scoring above.
-   - Places Autocomplete → replace the built-in city list.
-   The Leaflet map can stay, or swap `MapView` for the Google Maps JS API.
+1. **More live corridors** — repeat the Phase 2C pattern (dataset build +
+   provider route) per corridor; self-host Valhalla for real traffic
+   (Phase 2B recommendation). The older Google Maps idea is superseded by
+   the open-source stack above; `src/lib/googleMaps.ts` now only builds
+   the "Open in Google Maps" navigation link.
 2. **GitHub** — this is its own repo (`route-stop-finder`), separate from
    `wcfantasy` and SignalQA.
-3. **Vercel** — import the repo in Vercel, set the env var above in the
+3. **Vercel** — import the repo in Vercel, set the env vars above in the
    project settings, deploy. No database is needed for the MVP.
 
 ## Stack
