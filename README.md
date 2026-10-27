@@ -122,6 +122,36 @@ instead of results.
   routing calls.
 - Endpoint: `POST /api/live-find-stops`.
 
+## Performance & caching (Phase 2D)
+
+Measured on the public Valhalla demo server (Boston → DC, one stop):
+
+| Search | Before | After |
+|---|---|---|
+| McDonald's @3h, cold | 7.7 s | 5.2 s (incl. a slow 2.1 s direct-route call) |
+| Starbucks @5h / gas @4h / McDonald's no-pref | 5.2–6.3 s | **2.1–2.2 s** |
+| Reverse DC → Boston @3h | 6.2 s | 2.5 s |
+| Any repeat search within 10 min | 5.4–5.8 s | **< 0.05 s, zero API calls** |
+
+How: finalist detour calls run concurrently (max 4 in flight); 12
+finalists per stop instead of 8 — an exhaustive evaluation of all 173
+corridor McDonald's proved the wider set is needed for the true best
+stop when no time preference is set, and the app's @3h winner +
+alternatives now match the dataset-wide ground truth exactly;
+projections run on a decimated route path (validated error ≤ 0.03 min).
+Matrix routing was evaluated and rejected: the demo server caps matrix
+path distance at 150 km and matrix leg sums are not identical to
+routing through a stop.
+
+Caches (all in-memory, per server process, 10-minute TTL): direct
+routes, detour results keyed by the exact stop chain (max 500 entries),
+and candidate projections per route+query (max 50). They only speed up
+repeats — results are identical with or without them. **They are NOT
+shared across serverless instances** (e.g. separate Vercel functions
+have separate caches); no Redis/database is used. The API returns
+planner diagnostics (timings, call counts) when the request body sets
+`"debug": true`.
+
 ## Roadmap: live data + deployment
 
 1. **More live corridors** — repeat the Phase 2C pattern (dataset build +

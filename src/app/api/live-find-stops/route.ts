@@ -18,6 +18,8 @@ interface PostBody {
   destination?: string;
   stops?: StopRequest[];
   overrides?: Array<string | null>;
+  /** When true, include planner diagnostics (timings/call counts). */
+  debug?: boolean;
 }
 
 export async function POST(req: NextRequest) {
@@ -63,6 +65,7 @@ export async function POST(req: NextRequest) {
       candidatesByStop: data.candidatesByStop,
       stopMessages: data.stopMessages,
       plan,
+      ...(body.debug ? { diagnostics: data.diagnostics } : {}),
     });
   } catch (err) {
     if (err instanceof ProviderUnavailableError) {
