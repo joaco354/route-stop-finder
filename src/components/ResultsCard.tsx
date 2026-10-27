@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { buildGoogleMapsDirectionsUrl } from "@/lib/googleMaps";
 import { formatDuration } from "@/lib/scoring";
 import type { MultiStopResult, PlannedStop } from "@/lib/types";
@@ -10,6 +11,60 @@ interface Props {
   destinationLabel: string;
   /** Called when the user taps an alternative for a stop — re-plans later stops. */
   onSelectAlternative: (stopIndex: number, stop: PlannedStop) => void;
+}
+
+/**
+ * Copy the picked stop's address (name + address, ready to paste
+ * into any directions app). Falls back to name + coordinates when
+ * the dataset has no address for the business. Shows a brief
+ * "Copied" confirmation.
+ */
+function CopyAddressButton({ stop }: { stop: PlannedStop }) {
+  const [copied, setCopied] = useState(false);
+  const text = stop.address
+    ? `${stop.name}, ${stop.address}`
+    : `${stop.name}, ${stop.lat.toFixed(5)}, ${stop.lng.toFixed(5)}`;
+
+  const copy = async () => {
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch {
+      // Older / embedded browsers: textarea + execCommand fallback.
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch {
+        ok = false;
+      }
+    }
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      className={`mt-2 rounded-lg border px-3 py-1.5 text-sm font-semibold shadow-sm ${
+        copied
+          ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+          : "border-blue-200 bg-white text-blue-700 hover:border-blue-400"
+      }`}
+      aria-live="polite"
+    >
+      {copied ? "✓ Copied — paste it into your directions app" : "⧉ Copy address for directions"}
+    </button>
+  );
 }
 
 function StopDetails({ stop }: { stop: PlannedStop }) {
@@ -80,10 +135,11 @@ export default function ResultsCard({ plan, originLabel, destinationLabel, onSel
             </p>
             <h3 className="mt-1 text-xl font-bold text-slate-900">{entry.chosen.name}</h3>
             {entry.chosen.address ? (
-              <p className="text-sm text-slate-600">{entry.chosen.address}</p>
+              <p className="select-all text-sm text-slate-600">{entry.chosen.address}</p>
             ) : (
               <p className="text-sm text-slate-400">Address not listed — exact location on the map pin</p>
             )}
+            <CopyAddressButton stop={entry.chosen} />
             <StopDetails stop={entry.chosen} />
 
             {entry.alternatives.length > 0 && (
