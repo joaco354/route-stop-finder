@@ -185,3 +185,39 @@ print("counts:", dict(sorted(counts.items())), "total:", len(deduped))
 with open(OUT, "w") as f:
     json.dump(deduped, f, ensure_ascii=False, separators=(",", ":"))
 print("wrote", OUT)
+
+# Suggestion index for the search box autocomplete: every brand in the
+# dataset (with its location count) + the searchable category labels.
+# Kept as a separate small file so the client never loads the dataset.
+CATEGORY_LABELS = {
+    "restaurant": "Restaurant",
+    "fast_food": "Fast food",
+    "coffee": "Coffee shop",
+    "gas": "Gas station",
+    "ev_charging": "EV charging station",
+    "pharmacy": "Pharmacy",
+    "grocery": "Grocery store",
+    "convenience": "Convenience store",
+    "hotel": "Hotel",
+    "rest_area": "Rest area",
+}
+from collections import Counter
+
+brand_counts = Counter(e["brand"] for e in deduped if e["brand"])
+suggestions = [
+    {"label": label, "kind": "category", "count": counts.get(cat, 0)}
+    for cat, label in CATEGORY_LABELS.items()
+    if counts.get(cat, 0) > 0
+] + [
+    # General words travelers actually type, mapped to the same
+    # category terms the search understands.
+    {"label": "Food", "kind": "category", "count": counts.get("restaurant", 0) + counts.get("fast_food", 0)},
+    {"label": "Drug store", "kind": "category", "count": counts.get("pharmacy", 0)},
+] + [
+    {"label": brand, "kind": "brand", "count": n}
+    for brand, n in brand_counts.most_common()
+]
+SUGGESTIONS_OUT = "/home/hatch/workspace/route-stop-finder/src/lib/live/suggestions.json"
+with open(SUGGESTIONS_OUT, "w") as f:
+    json.dump(suggestions, f, ensure_ascii=False, separators=(",", ":"))
+print(f"wrote {SUGGESTIONS_OUT}: {len(suggestions)} suggestions")

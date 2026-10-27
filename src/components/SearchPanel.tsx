@@ -3,17 +3,8 @@
 import { CITIES } from "@/lib/cities";
 import { MAX_STOPS } from "@/lib/scoring";
 import type { StopRequest } from "@/lib/types";
+import QueryInput from "./QueryInput";
 import TimeSlider from "./TimeSlider";
-
-export const QUICK_QUERIES = [
-  "McDonald's",
-  "Starbucks",
-  "gas station",
-  "coffee",
-  "hotel",
-  "pharmacy",
-  "grocery",
-];
 
 interface Props {
   origin: string;
@@ -82,30 +73,13 @@ export default function SearchPanel(p: Props) {
 
           <div>
             <label className={labelCls} htmlFor={`query-${i}`}>Find Along Route</label>
-            <input
+            <QueryInput
               id={`query-${i}`}
               className={inputCls}
-              placeholder="McDonald's, Starbucks, gas station, hotel…"
+              placeholder="Start typing — McDonald's, Chick-fil-A, gas station…"
               value={stop.query}
-              onChange={(e) => p.onStopQuery(i, e.target.value)}
-              autoComplete="off"
+              onChange={(v) => p.onStopQuery(i, v)}
             />
-            <div className="mt-2 flex flex-wrap gap-2">
-              {QUICK_QUERIES.map((q) => (
-                <button
-                  key={q}
-                  type="button"
-                  onClick={() => p.onStopQuery(i, q)}
-                  className={`rounded-full border px-3 py-1 text-sm ${
-                    stop.query === q
-                      ? "border-blue-600 bg-blue-600 text-white"
-                      : "border-slate-300 bg-white text-slate-700"
-                  }`}
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
           </div>
 
           <TimeSlider
