@@ -7,6 +7,11 @@ Enter where you're going, what you need along the way (McDonald's, Starbucks,
 a gas station, a hotel, a pharmacy, groceries…), and optionally when you'd
 like to stop. The app ranks the candidates and shows the best one on a map.
 
+You can add **up to 4 stops** ("+ Add a stop"): each stop gets its own
+"find along route" search and its own optional stop-time slider, and the
+app plans them in the order you listed them between your start (A) and
+destination (B).
+
 This repo is the Next.js version of the static prototype. It is a lean MVP:
 no user accounts, no payments, no saved trips.
 
@@ -36,13 +41,17 @@ McDonald's, stop ~3 hours in** → best stop **McDonald's — Stamford
   CVS/Walgreens, hotels, grocery), New York → Boston, and
   Los Angeles → San Francisco. Other city pairs get a generic fallback:
   duration estimated from distance, with generated candidates along the route.
-- `src/lib/scoring.ts` — the ranking (also used by
-  `src/app/api/find-stops/route.ts`).
+- `src/lib/scoring.ts` — the ranking and the multi-stop planner (also used
+  by `src/app/api/find-stops/route.ts`, which accepts either the original
+  single-stop body `{ query, preferredStopMinutes }` or
+  `{ stops: [{ query, preferredStopMinutes }, …] }` and returns
+  `{ route, stops: [{ query, chosen, alternatives }], summary }`).
 - `src/components/MapView.tsx` — Leaflet + OpenStreetMap (no API key needed):
-  dashed line = direct route, solid blue = route via the selected stop.
+  dashed line = direct route, solid blue = route via your stops, drawn as
+  numbered markers in visit order.
 - `src/lib/googleMaps.ts` — the "Open in Google Maps" directions URL builder
-  (origin → stop waypoint → destination), plus the marked integration points
-  for live APIs.
+  (origin → all chosen stops as waypoints, in order → destination), plus the
+  marked integration points for live APIs.
 
 ### Scoring algorithm (no ML, fully transparent)
 
@@ -54,6 +63,31 @@ total trip time     = base duration + detourMinutes
 
 Lower score wins. One minute of detour counts the same as stopping one
 minute away from your preferred time.
+
+### Multiple stops (up to 4)
+
+Stops are planned **greedily, in the order you listed them**:
+
+1. For each stop, only candidates that come *after* the previously chosen
+   stop are eligible — a candidate's `minutesFromStart` must be more than
+   the previous stop's `minutesFromStart` + a 10-minute minimum gap (for
+   the first stop, anything after the start counts).
+2. Eligible candidates are ranked with the scoring above, using that
+   stop's own preferred time (or detour alone if unset). The best one is
+   chosen, then planning moves to the next stop.
+3. If no candidate exists after the previous stop for a query, that stop
+   shows an inline message ("No … found after the previous stop on this
+   route — try removing the time preference or reordering") and is left
+   out of the route; the remaining stops are still planned.
+4. Tapping an alternative for a stop swaps that stop in and re-plans the
+   stops *after* it (earlier stops stay fixed).
+
+The results show one card per stop (numbered to match the map) with the
+driving time from A until you reach that stop — including the detours of
+all earlier stops — plus a trip summary: direct duration, total added
+minutes across all stops, and the final total journey time
+(`base + Σ detours`). The Google Maps button sends every chosen stop as a
+waypoint, in order.
 
 ## Sample-data note
 

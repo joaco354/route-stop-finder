@@ -2,11 +2,15 @@ import { haversineMiles, resolveCity } from "./cities";
 import { findCorridorAnyDirection } from "./sampleData";
 import type {
   City,
+  FindMultiStopsInput,
   FindStopsInput,
   FindStopsResult,
+  MultiStopResult,
+  PlannedStop,
   RankedStop,
   RouteInfo,
   StopCandidate,
+  StopPlanEntry,
 } from "./types";
 
 /**
@@ -149,9 +153,17 @@ function buildGenericRoute(origin: City, destination: City): RouteInfo {
   };
 }
 
-export function findStops(input: FindStopsInput): FindStopsResult | { error: string } {
-  const origin = resolveCity(input.origin);
-  const destination = resolveCity(input.destination);
+interface ResolvedRoute {
+  route: RouteInfo;
+  corridor: ReturnType<typeof findCorridorAnyDirection>;
+}
+
+function resolveRoute(
+  originInput: string,
+  destinationInput: string,
+): ResolvedRoute | { error: string } {
+  const origin = resolveCity(originInput);
+  const destination = resolveCity(destinationInput);
   if (!origin || !destination) {
     return {
       error:
@@ -173,15 +185,153 @@ export function findStops(input: FindStopsInput): FindStopsResult | { error: str
         isSampleCorridor: true,
       }
     : buildGenericRoute(origin, destination);
+  return { route, corridor };
+}
 
+/** Candidates for one query on a resolved route: curated corridor matches,
+ *  or the generic fallback when the corridor has none. */
+function candidatesForQuery(
+  resolved: ResolvedRoute,
+  query: string,
+  preferredStopMinutes: number | null | undefined,
+): StopCandidate[] {
+  const { route, corridor } = resolved;
   let candidates: StopCandidate[] = corridor
-    ? corridor.stops.filter((s) => matchesQuery(s, input.query))
+    ? corridor.stops.filter((s) => matchesQuery(s, query))
     : [];
 
   if (candidates.length === 0) {
-    candidates = genericCandidates(route, input.query || "Stop", input.preferredStopMinutes);
+    candidates = genericCandidates(route, query || "Stop", preferredStopMinutes);
+  }
+  return candidates;
+}
+
+export function findStops(input: FindStopsInput): FindStopsResult | { error: string } {
+  const resolved = resolveRoute(input.origin, input.destination);
+  if ("error" in resolved) return resolved;
+
+  const candidates = candidatesForQuery(resolved, input.query, input.preferredStopMinutes);
+  const ranked = rankStops(
+    candidates,
+    resolved.route.durationMinutes,
+    input.preferredStopMinutes,
+  );
+  return { route: resolved.route, ranked, best: ranked[0] ?? null };
+}
+
+/**
+ * MULTI-STOP PLANNING — same transparent spirit, still no ML.
+ *
+ * A and B (origin/destination) are unchanged; up to MAX_STOPS stops are
+ * placed in between, processed strictly IN THE ORDER the user listed them
+ * (greedy, left to right):
+ *
+ *  1. For stop i, a candidate is only eligible if it lies further along
+ *     the route than the previously chosen stop: its minutesFromStart must
+ *     be strictly greater than (previous chosen minutesFromStart +
+ *     MIN_STOP_GAP_MINUTES). For the first stop the threshold is 0.
+ *  2. Eligible candidates are ranked with the existing scoreStop()
+ *     (detour + closeness to THIS stop's preferred time, or detour alone
+ *     when unset) and the best one is chosen — unless the caller pinned a
+ *     specific candidate via `overrides` (used when the user taps an
+ *     alternative; earlier stops stay fixed, later stops are re-planned).
+ *  3. If no candidate is eligible for a stop, that stop gets an `error`
+ *     entry and is omitted from the route; planning continues with the
+ *     following stops from the last successfully chosen stop.
+ *
+ * Timeline math: arrival at stop i = its minutesFromStart + the detours of
+ * all earlier chosen stops. Trip total = base duration + all detours.
+ */
+export const MAX_STOPS = 4;
+export const MIN_STOP_GAP_MINUTES = 10;
+
+export function findMultiStops(
+  input: FindMultiStopsInput,
+  overrides: Array<string | null> = [],
+): MultiStopResult | { error: string } {
+  const resolved = resolveRoute(input.origin, input.destination);
+  if ("error" in resolved) return resolved;
+  const { route } = resolved;
+
+  const requests = input.stops.slice(0, MAX_STOPS);
+  if (requests.length === 0) {
+    return { error: "Add at least one stop to find." };
   }
 
-  const ranked = rankStops(candidates, route.durationMinutes, input.preferredStopMinutes);
-  return { route, ranked, best: ranked[0] ?? null };
+  // Pass 1: choose a candidate per stop, in order.
+  interface Draft {
+    entry: Omit<StopPlanEntry, "chosen" | "alternatives">;
+    rankedEligible: RankedStop[];
+    chosenRaw: RankedStop | null;
+    earlierDetours: number; // detours of chosen stops before this one
+  }
+  const drafts: Draft[] = [];
+  let prevChosenMinutes = 0;
+  let earlierDetours = 0;
+
+  requests.forEach((req, i) => {
+    const preferred = req.preferredStopMinutes ?? null;
+    const threshold = i === 0 ? 0 : prevChosenMinutes + MIN_STOP_GAP_MINUTES;
+    const all = candidatesForQuery(resolved, req.query, preferred);
+    const eligible = all.filter((s) => s.minutesFromStart > threshold);
+
+    if (eligible.length === 0) {
+      drafts.push({
+        entry: {
+          query: req.query,
+          preferredStopMinutes: preferred,
+          error: `No ${req.query || "stop"} found after the previous stop on this route — try removing the time preference or reordering`,
+        },
+        rankedEligible: [],
+        chosenRaw: null,
+        earlierDetours,
+      });
+      return; // prevChosenMinutes / earlierDetours unchanged: stop is omitted
+    }
+
+    const rankedEligible = rankStops(eligible, route.durationMinutes, preferred);
+    const pinned = overrides[i] ? rankedEligible.find((s) => s.id === overrides[i]) : undefined;
+    const chosenRaw = pinned ?? rankedEligible[0];
+    drafts.push({
+      entry: { query: req.query, preferredStopMinutes: preferred },
+      rankedEligible,
+      chosenRaw,
+      earlierDetours,
+    });
+    prevChosenMinutes = chosenRaw.minutesFromStart;
+    earlierDetours += chosenRaw.detourMinutes;
+  });
+
+  const totalDetourMinutes = drafts.reduce((sum, d) => sum + (d.chosenRaw?.detourMinutes ?? 0), 0);
+
+  // Pass 2: decorate with cumulative arrivals and swap-in trip totals.
+  const stops: StopPlanEntry[] = drafts.map((d) => {
+    if (!d.chosenRaw) {
+      return { ...d.entry, chosen: null, alternatives: [] };
+    }
+    const chosenDetour = d.chosenRaw.detourMinutes;
+    const decorate = (s: RankedStop): PlannedStop => ({
+      ...s,
+      arrivalMinutes: s.minutesFromStart + d.earlierDetours,
+      totalMinutes: route.durationMinutes + (totalDetourMinutes - chosenDetour) + s.detourMinutes,
+    });
+    return {
+      ...d.entry,
+      chosen: decorate(d.chosenRaw),
+      alternatives: d.rankedEligible
+        .filter((s) => s.id !== d.chosenRaw!.id)
+        .slice(0, 3)
+        .map(decorate),
+    };
+  });
+
+  return {
+    route,
+    stops,
+    summary: {
+      baseMinutes: route.durationMinutes,
+      totalDetourMinutes,
+      totalMinutes: route.durationMinutes + totalDetourMinutes,
+    },
+  };
 }

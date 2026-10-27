@@ -8,17 +8,21 @@ interface Props {
   /** Preferred stop time in minutes from start, or null when unset (optional). */
   value: number | null;
   onChange: (v: number | null) => void;
+  /** Unique input id — set per stop when several sliders are on the page. */
+  id?: string;
+  /** Label text (defaults to the original wording). */
+  label?: string;
 }
 
-export default function TimeSlider({ durationMinutes, value, onChange }: Props) {
+export default function TimeSlider({ durationMinutes, value, onChange, id = "stop-time", label = "When do you want to stop?" }: Props) {
   const max = durationMinutes ?? 600;
   const enabled = value != null;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex items-center justify-between gap-3">
-        <label className="text-sm font-semibold text-slate-700" htmlFor="stop-time">
-          When do you want to stop? <span className="font-normal text-slate-400">(optional)</span>
+        <label className="text-sm font-semibold text-slate-700" htmlFor={id}>
+          {label} <span className="font-normal text-slate-400">(optional)</span>
         </label>
         {enabled ? (
           <button type="button" onClick={() => onChange(null)} className="text-sm font-medium text-blue-600 underline">
@@ -38,7 +42,7 @@ export default function TimeSlider({ durationMinutes, value, onChange }: Props) 
       {enabled ? (
         <>
           <input
-            id="stop-time"
+            id={id}
             type="range"
             min={0}
             max={max}

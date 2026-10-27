@@ -64,3 +64,51 @@ export interface FindStopsInput {
   /** Optional preferred stop time, in minutes from the start. Null = no preference. */
   preferredStopMinutes?: number | null;
 }
+
+/** One requested stop in a multi-stop trip (A → stops… → B). */
+export interface StopRequest {
+  query: string;
+  /** Optional preferred time for THIS stop, in minutes from the start. */
+  preferredStopMinutes?: number | null;
+}
+
+/**
+ * A candidate/chosen stop within a multi-stop plan.
+ * `arrivalMinutes` = driving time from A until you reach this stop,
+ * including the detours of all earlier CHOSEN stops.
+ * `totalMinutes` = the full trip total if this candidate is used for its
+ * stop (all other chosen stops unchanged).
+ */
+export interface PlannedStop extends RankedStop {
+  arrivalMinutes: number;
+}
+
+export interface StopPlanEntry {
+  query: string;
+  preferredStopMinutes: number | null;
+  /** The picked stop, or null when no candidate exists after the previous stop. */
+  chosen: PlannedStop | null;
+  /** Up to 3 other eligible candidates for this stop, best first. */
+  alternatives: PlannedStop[];
+  /** Set when the stop could not be placed; the stop is omitted from the route. */
+  error?: string;
+}
+
+export interface MultiStopSummary {
+  baseMinutes: number;
+  totalDetourMinutes: number;
+  totalMinutes: number;
+}
+
+export interface MultiStopResult {
+  route: RouteInfo;
+  stops: StopPlanEntry[];
+  summary: MultiStopSummary;
+}
+
+export interface FindMultiStopsInput {
+  origin: string;
+  destination: string;
+  /** 1–4 stops, visited in the order listed. */
+  stops: StopRequest[];
+}

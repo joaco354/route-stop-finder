@@ -4,9 +4,9 @@ import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import ResultsCard from "@/components/ResultsCard";
 import SearchPanel from "@/components/SearchPanel";
-import TimeSlider from "@/components/TimeSlider";
-import { findStops, formatDuration } from "@/lib/scoring";
-import type { FindStopsResult, RankedStop } from "@/lib/types";
+import type { MapAlternative } from "@/components/MapView";
+import { findMultiStops, formatDuration, MAX_STOPS } from "@/lib/scoring";
+import type { MultiStopResult, PlannedStop, StopRequest } from "@/lib/types";
 
 const MapView = dynamic(() => import("@/components/MapView"), {
   ssr: false,
@@ -17,45 +17,92 @@ const MapView = dynamic(() => import("@/components/MapView"), {
   ),
 });
 
+const INITIAL_STOPS: StopRequest[] = [{ query: "McDonald's", preferredStopMinutes: 180 }];
+
 export default function HomePage() {
   const [origin, setOrigin] = useState("Boston, MA");
   const [destination, setDestination] = useState("Washington, DC");
-  const [query, setQuery] = useState("McDonald's");
-  const [preferred, setPreferred] = useState<number | null>(180); // ~3h into the example trip
-  const [result, setResult] = useState<FindStopsResult | null>(null);
+  const [stops, setStops] = useState<StopRequest[]>(INITIAL_STOPS);
+  /** Pinned candidate ids per stop index (set when the user taps an alternative). */
+  const [overrides, setOverrides] = useState<Array<string | null>>([null]);
+  const [result, setResult] = useState<MultiStopResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const runSearch = useCallback(() => {
-    const res = findStops({ origin, destination, query, preferredStopMinutes: preferred });
-    if ("error" in res) {
-      setError(res.error);
-      setResult(null);
-      setSelectedId(null);
-      return;
-    }
-    setError(null);
-    setResult(res);
-    setSelectedId(res.best?.id ?? null);
-  }, [origin, destination, query, preferred]);
+  const runSearch = useCallback(
+    (nextStops: StopRequest[] = stops, nextOverrides: Array<string | null> = overrides) => {
+      const res = findMultiStops(
+        { origin, destination, stops: nextStops },
+        nextOverrides,
+      );
+      if ("error" in res) {
+        setError(res.error);
+        setResult(null);
+        return;
+      }
+      setError(null);
+      setResult(res);
+    },
+    [origin, destination, stops, overrides],
+  );
 
   // Auto-run the Boston → Washington, DC example on first load.
   useEffect(() => {
-    runSearch();
+    runSearch(INITIAL_STOPS, [null]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const selected: RankedStop | null = useMemo(() => {
-    if (!result) return null;
-    return result.ranked.find((s) => s.id === selectedId) ?? result.best;
-  }, [result, selectedId]);
+  const updateStop = (index: number, patch: Partial<StopRequest>) => {
+    const nextStops = stops.map((s, i) => (i === index ? { ...s, ...patch } : s));
+    // Editing a stop's request unpins its choice (it re-plans on next search).
+    const nextOverrides = overrides.map((o, i) => (i === index ? null : o));
+    setStops(nextStops);
+    setOverrides(nextOverrides);
+  };
+
+  const addStop = () => {
+    if (stops.length >= MAX_STOPS) return;
+    setStops([...stops, { query: "", preferredStopMinutes: null }]);
+    setOverrides([...overrides, null]);
+  };
+
+  const removeStop = (index: number) => {
+    if (stops.length <= 1) return;
+    setStops(stops.filter((_, i) => i !== index));
+    setOverrides(overrides.filter((_, i) => i !== index));
+  };
+
+  /** Pin an alternative for one stop and re-plan (earlier stops stay fixed,
+   *  later stops are re-selected after the new choice). */
+  const selectAlternative = useCallback(
+    (stopIndex: number, stop: PlannedStop) => {
+      const nextOverrides = overrides.map((o, i) => (i === stopIndex ? stop.id : o));
+      setOverrides(nextOverrides);
+      runSearch(stops, nextOverrides);
+    },
+    [overrides, stops, runSearch],
+  );
+
+  const chosenStops: PlannedStop[] = useMemo(
+    () => (result ? result.stops.flatMap((s) => (s.chosen ? [s.chosen] : [])) : []),
+    [result],
+  );
+
+  const mapAlternatives: MapAlternative[] = useMemo(
+    () =>
+      result
+        ? result.stops.flatMap((entry, stopIndex) =>
+            entry.alternatives.map((stop) => ({ stopIndex, stop })),
+          )
+        : [],
+    [result],
+  );
 
   return (
     <main className="mx-auto w-full max-w-6xl px-3 py-4 sm:px-6 md:py-8">
       <header className="mb-4 text-center md:mb-6">
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Route Stop Finder</h1>
         <p className="mt-1 text-sm text-slate-600 md:text-base">
-          The stop that adds the least driving time — near when you want to stop.
+          The stops that add the least driving time — near when you want to stop.
         </p>
       </header>
 
@@ -65,19 +112,16 @@ export default function HomePage() {
             <SearchPanel
               origin={origin}
               destination={destination}
-              query={query}
+              stops={stops}
+              durationMinutes={result?.route.durationMinutes ?? null}
               onOrigin={setOrigin}
               onDestination={setDestination}
-              onQuery={setQuery}
-              onSubmit={runSearch}
+              onStopQuery={(i, v) => updateStop(i, { query: v })}
+              onStopPreferred={(i, v) => updateStop(i, { preferredStopMinutes: v })}
+              onAddStop={addStop}
+              onRemoveStop={removeStop}
+              onSubmit={() => runSearch()}
             />
-            <div className="mt-4">
-              <TimeSlider
-                durationMinutes={result?.route.durationMinutes ?? null}
-                value={preferred}
-                onChange={(v) => setPreferred(v)}
-              />
-            </div>
             {result && (
               <p className="mt-3 text-center text-sm text-slate-500">
                 Direct trip: {formatDuration(result.route.durationMinutes)} · {result.route.distanceMiles} mi
@@ -91,15 +135,12 @@ export default function HomePage() {
             )}
           </section>
 
-          {result && result.best && selected && (
+          {result && (
             <ResultsCard
-              route={result.route}
-              best={result.best}
-              alternatives={result.ranked.slice(1, 4)}
-              selected={selected}
-              onSelect={(s) => setSelectedId(s.id)}
+              plan={result}
               originLabel={origin}
               destinationLabel={destination}
+              onSelectAlternative={selectAlternative}
             />
           )}
         </div>
@@ -107,12 +148,12 @@ export default function HomePage() {
         <section>
           <MapView
             route={result?.route ?? null}
-            candidates={result?.ranked ?? []}
-            selected={selected}
-            onSelect={(s) => setSelectedId(s.id)}
+            stops={chosenStops}
+            alternatives={mapAlternatives}
+            onSelectAlternative={selectAlternative}
           />
           <p className="mt-2 text-center text-xs text-slate-400">
-            Dashed = direct route · Blue = route via the selected stop · Sample data for the prototype
+            Dashed = direct route · Blue = route via your stops (numbered, in order) · Sample data for the prototype
           </p>
         </section>
       </div>

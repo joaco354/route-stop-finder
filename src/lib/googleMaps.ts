@@ -21,14 +21,21 @@ import type { StopCandidate } from "./types";
 export function buildGoogleMapsDirectionsUrl(params: {
   origin: string;
   destination: string;
+  /** Single waypoint (original API — kept for compatibility). */
   waypoint?: Pick<StopCandidate, "name" | "address"> | null;
+  /** Multiple waypoints, visited in the order given. Takes precedence over `waypoint`. */
+  waypoints?: Array<Pick<StopCandidate, "name" | "address">> | null;
 }): string {
   const url = new URL("https://www.google.com/maps/dir/");
   url.searchParams.set("api", "1");
   url.searchParams.set("origin", params.origin);
   url.searchParams.set("destination", params.destination);
-  if (params.waypoint) {
-    url.searchParams.set("waypoints", `${params.waypoint.name}, ${params.waypoint.address}`);
+  const stops = params.waypoints ?? (params.waypoint ? [params.waypoint] : []);
+  if (stops.length > 0) {
+    url.searchParams.set(
+      "waypoints",
+      stops.map((s) => `${s.name}, ${s.address}`).join("|"),
+    );
   }
   url.searchParams.set("travelmode", "driving");
   return url.toString();
