@@ -203,8 +203,7 @@ export default function HomePage() {
         </p>
       </header>
 
-      <div className="grid gap-4 md:grid-cols-[380px_1fr] md:gap-6">
-        <div className="space-y-4">
+      <div className="mx-auto w-full max-w-xl">
           <section className="rounded-2xl bg-white p-4 shadow-sm">
             <SearchPanel
               origin={origin}
@@ -246,26 +245,11 @@ export default function HomePage() {
               </p>
             )}
           </section>
-        </div>
-
-        <section>
-          <MapView
-            route={result?.route ?? null}
-            stops={chosenStops}
-            alternatives={mapAlternatives}
-            onSelectAlternative={selectAlternative}
-          />
-          <p className="mt-2 text-center text-xs text-slate-400">
-            Dashed = direct route · Blue = route via your stops (numbered, in order) ·{" "}
-            {liveActive
-              ? "Live route — Valhalla · Business data © OpenStreetMap contributors (ODbL)"
-              : "Beta coverage: the Northeast region (Bangor ↔ Washington, DC ↔ Buffalo)"}
-          </p>
-        </section>
       </div>
 
-      {/* Results BELOW the search + map row: on mobile the flow reads
-          locations → trip info → map → stop picks, in that order. */}
+      {/* Picks BEFORE the map (Joaquin's mobile-UX call): the flow
+          reads locations → trip info → stop picks → map. The map is
+          the verification step, not a roadblock before the answer. */}
       {result && (
         <div className="mx-auto mt-4 w-full max-w-3xl md:mt-6">
           <ResultsCard
@@ -276,6 +260,21 @@ export default function HomePage() {
           />
         </div>
       )}
+
+      <section className="mt-4 md:mt-6">
+        <MapView
+          route={result?.route ?? null}
+          stops={chosenStops}
+          alternatives={mapAlternatives}
+          onSelectAlternative={selectAlternative}
+        />
+        <p className="mt-2 text-center text-xs text-slate-400">
+          Dashed = direct route · Blue = route via your stops (numbered, in order) ·{" "}
+          {liveActive
+            ? "Live route — Valhalla · Business data © OpenStreetMap contributors (ODbL)"
+            : "Beta coverage: the Northeast region (Bangor ↔ Washington, DC ↔ Buffalo)"}
+        </p>
+      </section>
     </main>
   );
 }
